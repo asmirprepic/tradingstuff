@@ -6,7 +6,7 @@ It utilizies a multilevel index on the column where level 0 is the stock ticker 
 
 
 
-### [Agents](https://github.com/asmirprepic/tradingstuff/blob/main/agents.py)
+### [Agents](https://github.com/asmirprepic/tradingstuff/blob/main/agents)
 [Base class (abstract)](https://github.com/asmirprepic/tradingstuff/blob/main/agents/trading_agent.py)
 
 1. [Bollinger Bands](https://github.com/asmirprepic/tradingstuff/blob/main/agents/bollinger_bands_agent.py)
