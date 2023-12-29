@@ -46,4 +46,7 @@ It utilizies a multilevel index on the column where level 0 is the stock ticker 
   
 13. [Q-learning](https://github.com/asmirprepic/tradingstuff/blob/main/reinforcement_learning/reinforcement_agent.py)<br><br>
     <img src="https://github.com/asmirprepic/tradingstuff/blob/main/plots/AZN_ST_plot.png" width="600">
+
+14. [HighLow](https://github.com/asmirprepic/tradingstuff/blob/main/agents/high_low.py)<br><br>
+    <img src="https://github.com/asmirprepic/tradingstuff/blob/main/plots/HighLowAgent.png" width="600">
     
