@@ -52,4 +52,7 @@ It utilizies a multilevel index on the column where level 0 is the stock ticker 
 
 15. [Naive Bayes](https://github.com/asmirprepic/tradingstuff/blob/main/agents/naive_bayes_agent.py)<br><br>
     <img src="https://github.com/asmirprepic/tradingstuff/blob/main/plots/naive_bayes_AZNST.png" width="600">
+
+16. [Bayesian NN](https://github.com/asmirprepic/tradingstuff/blob/main/agents/bayesian_nn.py)<br><br>
+    <img src="https://github.com/asmirprepic/tradingstuff/blob/main/plots/bayesian_nn_AZNST.png" width="600">
     
