@@ -50,6 +50,16 @@ class TradingAgent(ABC):
 
     
     def _strategy_return_data(self,signals):
+        """
+        Calculate strategy return data for the given signals.
+        
+        Args:
+            signals (pd.DataFrame): DataFrame containing trading signals and returns.
+            
+        Returns:
+            tuple: A tuple containing the strategy return, buy and hold return, and total entries.
+        """
+          
         algorithm_name = self.algorithm_name
         signals['agent_returns'] = signals['return']*signals['Position'].shift(1)
         strategy_return = round(signals['agent_returns'].sum()*100,3)
@@ -96,9 +106,15 @@ class TradingAgent(ABC):
         ax.scatter(buy_signal.index,self.data[plot_index][buy_signal.index],color = 'green',marker = '^',label = 'Buy')
         ax.scatter(sell_signal.index,self.data[plot_index][sell_signal.index],color = 'red',marker = 'v',label = 'Sell')
 
-        plt.title(f'{stock} Price and Trading Positions' )
+        plt.title(f'{stock} Price and Trading Signals' )
         plt.legend()
         #plt.show()
+        # Filling areas
+        signals = self.signal_data[stock]
+        ax.fill_between(signals.index,self.data[(stock,'Close')].min(),self.data[(stock,'Close')].max(),
+        where = signals['Position']==1,color='green',alpha=0.1,label = 'Hold Period') 
+        ax.fill_between(signals.index, self.data[(stock, 'Close')].min(), self.data[(stock, 'Close')].max(),
+                          where=signals['Position'] == 0, color='red', alpha=0.1, label='Sell Period')
         return fig,ax
       
   
