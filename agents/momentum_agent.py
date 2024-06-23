@@ -37,12 +37,13 @@ class MomentumAgent(TradingAgent):
 
         signals = pd.DataFrame(index = self.data.index)
         signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
-        signals['Position'] = np.sign(signals['return'].rolling(self.back_length).mean())
-        signals['Signal'] = signals['Position'].diff()
+        signals['Momentum'] = signals['return'].rolling(self.back_length).mean()
+        signals['Position'] = np.where(signals['Momentum'] > 0, 1, np.where(signals['Momentum'] < 0, -1, 0))
+        signals['Signal'] = signals['Position'].diff().fillna(0).astype(int)
+        signals['Signal'] = signals['Signal'].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
 
         
         self.signal_data[stock] = signals
 
-
-
+   
         
