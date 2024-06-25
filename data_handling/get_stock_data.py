@@ -2,7 +2,7 @@ import pandas as pd
 import yfinance as yf
 import datetime as dt
 
-class GetStockData:
+class GetStockDataTest:
   def __init__(self,stocks,startdate,enddate,interval = "60m", data_types = None):
 
     if data_types is None:
@@ -38,7 +38,9 @@ class GetStockData:
     combined_data = pd.concat(all_data)
     combined_data.index=pd.to_datetime(combined_data.index)
 
-    combined_data = self._filter_trading_hours(combined_data)
+    if self.interval.endswith('m'):
+            combined_data = self._filter_trading_hours(combined_data)
+    
     return self._process_yfinance_data(combined_data)
 
     # Create a DataFrame with each stock's specified price type as a column
@@ -104,15 +106,3 @@ class GetStockData:
 
     return self.data
 
-
-
-
-
-
-    if all_data:
-        combined_data = pd.concat(all_data)
-        combined_data.index = pd.to_datetime(combined_data.index)
-        combined_data = self._filter_trading_hours(combined_data)
-        self.data = self._process_yfinance_data(combined_data)
-
-    return self.data
