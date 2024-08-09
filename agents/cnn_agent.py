@@ -113,6 +113,40 @@ class CNNAgent(TradingAgent):
       model.fit(X_train,Y_train,epochs = 20, batch_size = 32, verbose = 0)
 
       return model
+
+      def generate_signal_strategy(self,stock):
+        """  
+        Generates trading signals for the specified stock using trained CNN model. 
+        A signal is generated for each time period based on the predicted direction of the stock price. 
+
+        Args: 
+          stock (str): The stock symbol for which to generate signals
+
+        The method updates the signal_data attribute with signals for the given stock. 
+
+        """
+
+        signals = pd.DataFrame(index = self.data.index)
+        time_steps = 10
+        X,_ = self.create_classifcation_trading_condition(stock)
+        X = self.prepare_cnn_data(X,time_steps)
+        cnn_model = self.CNN_model(stock)
+        prediction = (self.cnn_model.predict(X) > 0.5).as_type(int).flatten()
+
+        signals= signals.loc[self.data.index[time_steps:len(prediction) + time_steps]]
+        signals['Prediction'] = prediction
+        signals['Position']= signals['Prediction'].apply(lambda x: 1 if x == 1 else 0)
+
+        # Calculate Signal as change in position
+        signals['Signal'] =0 
+        signals.loc[signals['Position'] > signals['Position'].shift(1),'Signal'] = 1
+        signals.loc[signals['Position'] < signals['Position'].shift(1),'Signal'] = -1
+        
+        signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
+
+        self.signal_data[stock] = signals
+
+        
                 
       
 
