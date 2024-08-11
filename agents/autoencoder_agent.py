@@ -1,6 +1,10 @@
+from agents.trading_agent import TradingAgent
 from sklearn.preprocessing import StandardScaler
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, Dense
+import numpy as np
+
+
 
 class AutoencoderAgent(TradingAgent):
     def __init__(self, data):
