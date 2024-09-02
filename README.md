@@ -7,7 +7,8 @@ It utilizies a multilevel index on the column where level 0 is the stock ticker 
 
 
 ### [Agents](https://github.com/asmirprepic/tradingstuff/blob/main/agents)
-[Base class (abstract)](https://github.com/asmirprepic/tradingstuff/blob/main/agents/trading_agent.py)
+[Base class (abstract)](https://github.com/asmirprepic/tradingstuff/blob/main/agents/base_agents/trading_agent.py)
+[Base class (ML)](https://github.com/asmirprepic/tradingstuff/blob/main/agents/base_agents/ml_based/ml_trading_agent.py)
 
 1. [Bollinger Bands](https://github.com/asmirprepic/tradingstuff/blob/main/agents/technical/bollinger_bands_agent.py)<br><br>
    <img src="https://github.com/asmirprepic/tradingstuff/blob/main/plots/BollingerBandsAgent_AZN_ST.png" width="600">
