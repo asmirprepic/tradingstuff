@@ -36,6 +36,37 @@ class MLTradingAgent(TradingAgent):
     self.feature = features
     self.trained = False
 
+  def default_feature_engineering(self,stock):
+    """
+    Standard feature engineering that calculates common trading features. 
+
+    Args:
+    -----------------
+    stock (str): The stock symbol for which stock to generate the symbol. 
+
+    Returns:
+    ----------------
+    tuple: A tuple containing: 
+      - pd.DataFrame: A dataframe containing engineered values
+      - pd.Series: A series containing the target variable for training
+
+    """
+
+    data_copy = self.data[stock].copy()
+    data_copy['Open-Close'] = self.data[stock]['Open'] - self.data[stock]['Close']
+    data_copy['High-Low'] = self.data[stock]['High'] - self.data[stock]['Low']
+    
+    # Assuming that the last observation will hold without any fluctuations.
+    data_copy.ffill()
+
+    X = self.data_copy[self.features]
+    # Target variable based on next periods price movement. Used for classification
+    Y = np.where(self.data[stock]['Close'].shift(-1) > self.data[stock]['Close'],1,-1)
+    Y_series = pd.Series(Y,index = self.data[stock].index)
+    Y = Y_series.loc[X.index]
+
+    return X,Y
+    
   @abstractmethod
   def feature_engineering(self,stock):
     """
@@ -56,8 +87,8 @@ class MLTradingAgent(TradingAgent):
       - pd.Series: A Series containing the target variable for training. 
     """
 
-    pass 
-
+    return self.default_feature_engineering(stock)
+    
 
   def train_model(self,stock,test_size = 0.2)
     """
@@ -77,6 +108,72 @@ class MLTradingAgent(TradingAgent):
     if not self.model or not self.features: 
       raise ValueError("Model and features must be defined to train the model")
 
-    features_df = self.feature_engineering(stock)
-    X = features_df[self.features]
-    y = 
+    X,y = self.feature_engineering(stock)
+    X_train,X_test, y_train,y_test = train_test_split(X,y,test_size =test_size)
+
+    self.model.fit(X_train,y_train)
+    y_pred = self.model.predict(X_test)
+
+    metrics = {
+      'accuracy' = accuracy_score(y_test,y_pred),
+     # 'precision' = precision_score(y_test,y_pred),
+     # 'recall' = recall_score(y_test,y_pred),
+     # 'f1_score' = f1_score(y_test,y_pred)
+    }
+    print(f"Model Performance metrics for {stock} ({self.algorithm_name}):")
+    for metric,value in metrics.items():
+      print(f"{metric}: {value:.4f}")
+    return metrics
+
+
+  
+  @abstractmethod
+  def generate_signal_strategy(self,stock,*args):
+    """
+    Abstract method to generate trading signals for a given stock using the ML model. 
+
+    This method should be implemented by subclasses to define the specific strategy for generating sigals using 
+    the trained ML model. 
+
+    Args: 
+    ----------
+    stock (str): The stock symbol for which to generate the signals. 
+    """
+  pass
+
+  def prdict_signals(self,stock):
+    """
+    Use the trained ML to predict trading signals. 
+
+    Args:
+    -----------
+    stock (str): The stock symbol for which to predict signals. 
+
+    Returns:
+    ----------
+    pd.DataFrame: A dataframe containing the predicted signals
+
+    """
+    if not self.trained: 
+      raise ValueError("Model needs to be trained before predicting signals")
+
+    X,_ = self.feature_engineering(stock)
+    predictions = self.model.predict(X)
+
+    signals = pd.DataFrame(index = self.data.index)
+    signals = signals.loc[X.index]
+    signals['Prediction'] = prediction
+    signals['Position'] = signals['Prediction'].apply(lambda x: 1 if x > 0.55 else 0)
+
+    # Calculate Signal as the change in position
+    signals['Signal'] = 0
+    signals.loc[signals['Position'] > signals['Position'].shift(1),'Signal'] = 1
+    signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
+    signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
+
+    return signals
+    
+    
+  
+    
+    
