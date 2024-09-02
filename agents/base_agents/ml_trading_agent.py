@@ -4,7 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score,precision_score, recall_score, f1_score
-from agents.trading_agent import TradingAgent
+from agents.base_agents.trading_agent import TradingAgent
 
 class MLTradingAgent(TradingAgent): 
   """
