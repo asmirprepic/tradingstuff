@@ -3,7 +3,7 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from tensorflow.keras.layers import LSTM, Dense
 from tensorflow.keras.models import Sequential
-from agents.trading_agent import TradingAgent
+from agents.base_agents.trading_agent import TradingAgent
 
 
 class LSTMAnomalyAgent(TradingAgent):

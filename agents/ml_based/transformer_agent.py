@@ -3,7 +3,7 @@ import pandas as pd
 import tensorflow as tf
 from tensorflow.keras import layers, models
 from sklearn.preprocessing import MinMaxScaler
-from agents.trading_agent import TradingAgent
+from agents.base_agents.trading_agent import TradingAgent
 
 class TransformerAgent(TradingAgent):
     """

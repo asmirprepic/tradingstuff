@@ -1,4 +1,4 @@
-from agents.trading_agent import TradingAgent
+from agents.base_agents.trading_agent import TradingAgent
 import numpy as np
 import pandas as pd
 import tensorflow as tf

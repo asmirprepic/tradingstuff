@@ -5,7 +5,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras import backend as K
 from sklearn.preprocessing import StandardScaler
 from tensorflow.keras.losses import mse
-from agents.trading_agent import TradingAgent
+from agents.base_agents.trading_agent import TradingAgent
 
 
 class VAEAgent(TradingAgent):

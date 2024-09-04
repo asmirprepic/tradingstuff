@@ -7,7 +7,7 @@ from tensorflow.keras.layers import Dense, Conv1D, BatchNormalization, ReLU, Fla
 from tensorflow.keras.layers import Input, Add
 from tensorflow.keras.models import Model
 from sklearn.preprocessing import MinMaxScaler
-from agents.trading_agent import TradingAgent
+from agents.base_agents.trading_agent import TradingAgent
 
 class TCNAgent(TradingAgent):
     """ A trading agent that uses a Temporcal Convolutional Network to generate trading signals"""

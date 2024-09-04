@@ -1,4 +1,4 @@
-from agents.trading_agent import TradingAgent
+from agents.base_agents.trading_agent import TradingAgent
 import tensorflow as tf
 from tensorflow.keras.layers import LSTM, Dense, Input, Attention, Concatenate
 from tensorflow.keras.models import Model
