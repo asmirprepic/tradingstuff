@@ -79,25 +79,25 @@ class PerformanceBasedAgent(TradingAgent):
     
     for stock in self.stocks_in_data:
         # Log return: ln(P_t/P_(t-period_length))
-        returns[stock] = np.log(self.data[(stock, 'Close')] / self.data[(stock, 'Close')].shift(period_length))
+        returns[stock] = np.log(self.data[(stock, 'Close')] / self.data[(stock, 'Close')].shift(self.period_length))
 
     # Shift returns to avoid lookahead bias
     returns = returns.shift(1)
     
     # Rank stocks based on returns in descending order for each period
-    ranked_returns = returns.rank(axis=1, method='first', ascending=False)
+    ranked_returns = returns.rank(axis=1, method='average', ascending=False)
 
     # Initalize DataFrame to store buy signals (1 = buy, 0 = no action)
     signals = pd.DataFrame(index=self.data.index)
 
     # Generate buy signals for top N stocks on ranked returns
-    for date in ranked_returns.index:
-        if pd.notna(ranked_returns.loc[date]).all():
-            top_stocks = ranked_returns.loc[date][ranked_returns.loc[date] <= self.top_n].index
-            for stock in self.stocks_in_data:
-                signals.loc[date, stock] = 1 if stock in top_stocks else 0
-        else:
-            signals.loc[date, :] = 0
+    #for date in ranked_returns.index:
+    #    if pd.notna(ranked_returns.loc[date]).all():
+    #        top_stocks = ranked_returns.loc[date][ranked_returns.loc[date] <= self.top_n].index
+    #        for stock in self.stocks_in_data:
+    #            signals.loc[date, stock] = 1 if stock in top_stocks else 0
+    #    else:
+    #        signals.loc[date, :] = 0
     
     # Adjust signals to reflect the holding period
     holding_signals = signals.copy()
@@ -105,12 +105,13 @@ class PerformanceBasedAgent(TradingAgent):
         period_signals = signals.iloc[i:i + self.holding_period]
         if period_signals.empty:
             continue
-        # Stocks selected at the beginning of the period
-        top_stocks = period_signals.iloc[0][period_signals.iloc[0] == 1].index
+          
+        # Select top N stocks at the start of the period (i.e., on day i)  
+        top_stocks = period_signals.iloc[0][period_signals.iloc[0] <= self.top_n].index
         for j in range(self.holding_period):
             if i + j < len(signals):
-                holding_signals.iloc[i + j] = 0
-                holding_signals.iloc[i + j][top_stocks] = 1
+                holding_signals.iloc[i + j] = 0 # Reset all signals to 0 for the day
+                holding_signals.iloc[i + j][top_stocks] = 1 # Set buy signals for top stocks
     # Store selected stocks in the beginning of the period
     self.signal_data = holding_signals
 
@@ -159,7 +160,11 @@ class PerformanceBasedAgent(TradingAgent):
             # Calculate the combined return for the selected stocks
             initial_prices = self.data.loc[prev_date, [(stock, 'Close') for stock in selected_stocks]].values
             current_prices = self.data.loc[date, [(stock, 'Close') for stock in selected_stocks]].values
-            portfolio_return = (current_prices.sum() - initial_prices.sum()) / initial_prices.sum()
+            if initial_prices.sum() != 0
+            
+              portfolio_return = (current_prices.sum() - initial_prices.sum()) / initial_prices.sum()
+            else:
+              portfolio_return = 0
             portfolio_log_returns[date] = np.log(1 + portfolio_return)
 
             # Log selected stocks and cumulative prices
