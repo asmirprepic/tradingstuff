@@ -217,8 +217,14 @@ class PerformanceBasedAgent(TradingAgent):
     fig, ax = plt.subplots(figsize=(14, 7))
     # Calculate the returns for the strategy and buy_and hold. 
     strategy_return = self.cumulative_returns.iloc[-1] * 100  # Convert to percentage
-    buy_and_hold_return = (self.data.xs(self.price_type, level=1, axis=1).iloc[-1] / self.data.xs(self.price_type, level=1, axis=1).iloc[0] - 1).mean() * 100  # Convert to percentage
-    
+
+    # Get total portfolio value at the start (initial) and the end (final)
+    initial_portfolio_value = self.data.xs(self.price_type, level=1, axis=1).iloc[0].sum()
+    final_portfolio_value = self.data.xs(self.price_type, level=1, axis=1).iloc[-1].sum()
+
+    # Calculate the cumulative return for the entire buy_and_hold portfolio
+    buy_and_hold_return = (final_portfolio_value / initial_portfolio_value - 1) * 100
+
     # Plot bars for strategy and buy and hold return 
     bars1 = ax.bar(['Strategy Return'], [strategy_return], width=0.4, label='Strategy Return')
     bars2 = ax.bar(['Buy and Hold Return'], [buy_and_hold_return], width=0.4, label='Buy and Hold Return')
