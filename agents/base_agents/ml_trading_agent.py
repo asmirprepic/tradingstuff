@@ -6,12 +6,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score,precision_score, recall_score, f1_score
 from agents.base_agents.trading_agent import TradingAgent
 
-class MLTradingAgent(TradingAgent): 
+class MLBasedAgent(TradingAgent): 
   """
   Abstract base class for machine-learning based trading algorithms.
 
-  This class extends the TradingAgent class to include methods specific to machine learning
-  models. 
+  This class provides the shared functionality for ML-based trading strategies, including
+  feature creation, train-test splitting, and signal generation. Subclasses should implement
+  the `train_model` method to define the specific machine learning model used
 
   Attributes: 
   ---------------
@@ -36,6 +37,46 @@ class MLTradingAgent(TradingAgent):
     self.feature = features
     self.trained = False
 
+  def create_classification_trading_condition(self,stock):
+    """
+    Creates the feature set for classification model. 
+
+    Args:
+    -----------
+      stock (str): The stock symbol for which to create features. 
+
+    Returns:
+    ----------
+      pd.DataFrame: The features set
+      pd.Series: The target variable where 1 indicates an upward price movement and -1 indicates a downward price movement. 
+    """
+
+    data_copy = self.data[stock].copy()
+    data_copy['High-low'] = self.data[stock]['High'] - self.data[stock]['Low']
+    data_copy['Open-Close'] = self.data[stock]['Open'] - self.data[stock]['Close']
+    data_copy.ffill()
+
+    X = data_copy[['High-Low','Open-Close']]
+    Y = np.where(self.data[stock]['Close'].shift(-1) > self.data['Close'],1,-1)
+    Y_series = pd.Series(Y,index = self.data[stock].index)
+    Y = Y_series.loc[X.index]
+
+    return X,Y
+
+  def create_train_split_group(self,X,Y,split_ratio):
+    """
+    Splits the dataset into training and testing sets. 
+
+    Args: 
+    -------------
+      X (pd.DataFrame): The feature set
+      Y (pd.DataFrame): The target variable
+      split_ratio (float): The proportion of the dataset to include in the train split
+
+    """
+
+    return train_test_split(X,Y,shuffle = False, test_size = 1-split_ratio)
+    
   def default_feature_engineering(self,stock):
     """
     Standard feature engineering that calculates common trading features. 
