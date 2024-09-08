@@ -98,7 +98,7 @@ class MLBasedAgent(TradingAgent):
     data_copy['High-Low'] = self.data[stock]['High'] - self.data[stock]['Low']
     
     # Assuming that the last observation will hold without any fluctuations.
-    data_copy.ffill()
+    data_copy.ffill(inplace = True)
 
     X = self.data_copy[self.features]
     # Target variable based on next periods price movement. Used for classification
@@ -131,7 +131,7 @@ class MLBasedAgent(TradingAgent):
     return self.default_feature_engineering(stock)
     
 
-  def train_model(self,stock,test_size = 0.2)
+  def train_model(self,stock,test_size = 0.2):
     """
     Trains the model on the specific stocks data. 
 
@@ -156,7 +156,7 @@ class MLBasedAgent(TradingAgent):
     y_pred = self.model.predict(X_test)
 
     metrics = {
-      'accuracy' = accuracy_score(y_test,y_pred),
+      'accuracy' : accuracy_score(y_test,y_pred),
      # 'precision' = precision_score(y_test,y_pred),
      # 'recall' = recall_score(y_test,y_pred),
      # 'f1_score' = f1_score(y_test,y_pred)
@@ -164,6 +164,7 @@ class MLBasedAgent(TradingAgent):
     print(f"Model Performance metrics for {stock} ({self.algorithm_name}):")
     for metric,value in metrics.items():
       print(f"{metric}: {value:.4f}")
+    self.trained = True
     return metrics
 
 
@@ -182,7 +183,7 @@ class MLBasedAgent(TradingAgent):
     """
   pass
 
-  def prdict_signals(self,stock):
+  def predict_signals(self,stock):
     """
     Use the trained ML to predict trading signals. 
 
@@ -203,7 +204,7 @@ class MLBasedAgent(TradingAgent):
 
     signals = pd.DataFrame(index = self.data.index)
     signals = signals.loc[X.index]
-    signals['Prediction'] = prediction
+    signals['Prediction'] = predictions
     signals['Position'] = signals['Prediction'].apply(lambda x: 1 if x > 0.55 else 0)
 
     # Calculate Signal as the change in position
