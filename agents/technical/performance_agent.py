@@ -91,13 +91,13 @@ class PerformanceBasedAgent(TradingAgent):
     signals = pd.DataFrame(index=self.data.index)
 
     # Generate buy signals for top N stocks on ranked returns
-    #for date in ranked_returns.index:
-    #    if pd.notna(ranked_returns.loc[date]).all():
-    #        top_stocks = ranked_returns.loc[date][ranked_returns.loc[date] <= self.top_n].index
-    #        for stock in self.stocks_in_data:
-    #            signals.loc[date, stock] = 1 if stock in top_stocks else 0
-    #    else:
-    #        signals.loc[date, :] = 0
+    for date in ranked_returns.index:
+        if pd.notna(ranked_returns.loc[date]).all():
+            top_stocks = ranked_returns.loc[date][ranked_returns.loc[date] <= self.top_n].index
+            for stock in self.stocks_in_data:
+                signals.loc[date, stock] = 1 if stock in top_stocks else 0
+        else:
+            signals.loc[date, :] = 0
     
     # Adjust signals to reflect the holding period
     holding_signals = signals.copy()
