@@ -52,9 +52,9 @@ class PerformanceBasedAgent(TradingAgent):
     self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
     # Generate buy sell signals for the strategy
-    self.generate_signal_strategy()
+    #self.generate_signal_strategy()
     # Calculate portfolio returns based on the signals
-    self.calculate_returns()
+    #self.calculate_returns()
 
   def generate_signal_strategy(self):
     """
@@ -79,41 +79,43 @@ class PerformanceBasedAgent(TradingAgent):
     
     for stock in self.stocks_in_data:
         # Log return: ln(P_t/P_(t-period_length))
-        returns[stock] = np.log(self.data[(stock, 'Close')] / self.data[(stock, 'Close')].shift(self.period_length))
+        try:
+          returns[stock] = np.log(self.data[(stock, 'Close')] / self.data[(stock, 'Close')].shift(self.period_length))
+        except Exception as e: 
+          print(f"Could not calculate returns with exception: {e}")
 
+    #
+    returns.fillna(0,inplace= True)   
     # Shift returns to avoid lookahead bias
     returns = returns.shift(1)
     
     # Rank stocks based on returns in descending order for each period
-    ranked_returns = returns.rank(axis=1, method='average', ascending=False)
-
+    ranked_returns = returns.rank(axis=1, method='first', ascending=False)
+    
     # Initalize DataFrame to store buy signals (1 = buy, 0 = no action)
-    signals = pd.DataFrame(index=self.data.index)
+    signals = pd.DataFrame(index=self.data.index,columns = self.stocks_in_data)
 
     # Generate buy signals for top N stocks on ranked returns
-    for date in ranked_returns.index:
-        if pd.notna(ranked_returns.loc[date]).all():
-            top_stocks = ranked_returns.loc[date][ranked_returns.loc[date] <= self.top_n].index
-            for stock in self.stocks_in_data:
-                signals.loc[date, stock] = 1 if stock in top_stocks else 0
-        else:
-            signals.loc[date, :] = 0
-    
-    # Adjust signals to reflect the holding period
-    holding_signals = signals.copy()
-    for i in range(0, len(signals), self.holding_period):
-        period_signals = signals.iloc[i:i + self.holding_period]
-        if period_signals.empty:
-            continue
+    for i in range(0,len(returns),self.holding_period):
+      # Get the period returns for the data
+      period_returns = returns.iloc[i]
+      
+      # Handle the case when period_returns is NaN
+      if pd.isna(period_returns).any():
+        continue
+      
+      # Select the top N stocks with the highest return 
+      top_stocks = period_returns.nsmallest(self.top_n).index.intersection(signals.columns)
+      #print(f"Date: {self.data.index[i]},Selected top stocks: {top_stocks}")
+
+      # Generate buy signals for the next holding period
+      for j in range(self.holding_period):
+        if i+j < len(signals):
           
-        # Select top N stocks at the start of the period (i.e., on day i)  
-        top_stocks = period_signals.iloc[0][period_signals.iloc[0] <= self.top_n].index
-        for j in range(self.holding_period):
-            if i + j < len(signals):
-                holding_signals.iloc[i + j] = 0 # Reset all signals to 0 for the day
-                holding_signals.iloc[i + j][top_stocks] = 1 # Set buy signals for top stocks
-    # Store selected stocks in the beginning of the period
-    self.signal_data = holding_signals
+          # Set buy signals
+          signals.iloc[i+j][top_stocks] =1
+
+    self.signal_data = signals
 
   def calculate_returns(self):
     """
@@ -140,7 +142,10 @@ class PerformanceBasedAgent(TradingAgent):
     # Calculate the daily returns of each stock
     daily_returns = pd.DataFrame(index=self.data.index)
     for stock in self.stocks_in_data:
-        daily_returns[stock] = self.data[(stock, 'Close')].pct_change().fillna(0)
+        try:
+          daily_returns[stock] = np.log(self.data[(stock, 'Close')]).diff().fillna(0)
+        except Exception as e: 
+          print(f"Could not calculate daily returns: {e}")
 
     # Initialize series for portfolio log returns
     portfolio_log_returns = pd.Series(index=self.data.index, dtype=np.float64)
@@ -160,18 +165,29 @@ class PerformanceBasedAgent(TradingAgent):
             # Calculate the combined return for the selected stocks
             initial_prices = self.data.loc[prev_date, [(stock, 'Close') for stock in selected_stocks]].values
             current_prices = self.data.loc[date, [(stock, 'Close') for stock in selected_stocks]].values
-            if initial_prices.sum() != 0
             
-              portfolio_return = (current_prices.sum() - initial_prices.sum()) / initial_prices.sum()
+
+            if initial_prices.sum() != 0:
+              try:
+                if current_prices.sum() <= 0 or initial_prices.sum() <= 0:
+                  print(f"Warning: Non-positive values found - Current Prices: {current_prices.sum()}, Initial Prices: {initial_prices.sum()}")
+                  portfolio_log_return = 0
+                else:
+                  portfolio_log_return = np.log(current_prices.sum() / initial_prices.sum())
+                  
+              except Exception as e: 
+                print("Exception thrown: {e}")
+              
             else:
-              portfolio_return = 0
-            portfolio_log_returns[date] = np.log(1 + portfolio_return)
+              portfolio_log_return = 0
+            portfolio_log_returns[date] = portfolio_log_return
 
             # Log selected stocks and cumulative prices
             self.selection_log.at[date, 'Selected_Stocks'] = selected_stocks.tolist()
             self.selection_log.at[date, 'Cumulative_Prices'] = current_prices.sum()
             self.selection_log.at[date, 'Log_Return'] = portfolio_log_returns[date]
         else:
+            print(f"No selected stocks for date {date}, setting log return to 0")
             portfolio_log_returns[date] = 0
             self.selection_log.at[date, 'Selected_Stocks'] = []
             self.selection_log.at[date, 'Cumulative_Prices'] = 0
@@ -226,9 +242,9 @@ class PerformanceBasedAgent(TradingAgent):
     # Get total portfolio value at the start (initial) and the end (final)
     initial_portfolio_value = self.data.xs(self.price_type, level=1, axis=1).iloc[0].sum()
     final_portfolio_value = self.data.xs(self.price_type, level=1, axis=1).iloc[-1].sum()
-
+    print(initial_portfolio_value,final_portfolio_value)
     # Calculate the cumulative return for the entire buy_and_hold portfolio
-    buy_and_hold_return = (final_portfolio_value / initial_portfolio_value - 1) * 100
+    buy_and_hold_return = np.log(final_portfolio_value / initial_portfolio_value )*100
 
     # Plot bars for strategy and buy and hold return 
     bars1 = ax.bar(['Strategy Return'], [strategy_return], width=0.4, label='Strategy Return')
