@@ -51,7 +51,7 @@ class GetStockDataTest:
           return pd.DataFrame()  # Or handle this case differently based on your needs
 
       raw_data.reset_index(inplace=True)
-      raw_data.set_index(['Datetime', 'Stock'], inplace=True)
+      raw_data.set_index(['Date', 'Stock'], inplace=True)
       raw_data = raw_data[self.data_types]
       processed_data = raw_data.unstack(level='Stock')
       processed_data.columns = processed_data.columns.swaplevel(0, 1)
