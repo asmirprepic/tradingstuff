@@ -3,8 +3,36 @@ import yfinance as yf
 import datetime as dt
 
 class GetStockDataTest:
-  def __init__(self,stocks,startdate,enddate,interval = "60m", data_types = None):
+  """  
+  A class to fetch and process stock data from Yahoo Finance. 
 
+  Attributes: 
+  ----------------
+    stocks (list): A list of stock tickers to fetch data for
+    start_date (pd.Timestamp): The start date for historical data
+    end_date (pd.Timestamp): The end date for fetching historical data
+    interval (str): The data interval for fetching historical data
+    data_types (list): List of data types to fetch e.g ['Close']
+
+  Methods: 
+  ---------------
+    getData(): Fetch and process stock data based on initialization parameters
+    update_date(): Update stock data with new information if available
+
+  """
+  def __init__(self,stocks,startdate,enddate,interval = "60m", data_types = None):
+    """  
+    Initalizes the GetStockData instance with specified parameters.
+
+    Parameters:
+    -------------
+      stocks (list or str): List of stock tickers or a single ticker
+      startdate (str): Start date for fetching historial data
+      endate (str): End date for fetching historical data
+      interval (str): Data interval (default is "60m")
+      data_types (list): Types of data to fetch
+
+    """
     if data_types is None:
       data_types = ["Close"]
 
@@ -14,10 +42,13 @@ class GetStockDataTest:
     self.data_types = data_types if isinstance(data_types,list) else [data_types]
     self.interval = interval
     
-    self.data = self.getData()
+    
 
 
   def getData(self):
+    """   
+    Fetch and process historical stock data for the given parameters
+    """
    
     if self.start_date > self.end_date:
         raise ValueError("Start date must be earlier than end date.")
@@ -43,9 +74,18 @@ class GetStockDataTest:
     
     return self._process_yfinance_data(combined_data)
 
-    # Create a DataFrame with each stock's specified price type as a column
-
   def _process_yfinance_data(self, raw_data):
+      """
+      Process raw data from Yahoo Finance
+
+      Parameters: 
+      ------------
+        raw_data (pd.DataFrame): The raw stock data fetched from Yahoo Finance
+
+      Returns: 
+      ------------
+        pd.DataFrame: A DataFrame with processed stock data, where each stock data is in sepearate columns
+      """
       if raw_data.empty:
           print("Warning: No data available for the specified data types and stocks.")
           return pd.DataFrame()  # Or handle this case differently based on your needs
@@ -61,6 +101,18 @@ class GetStockDataTest:
   
 
   def _filter_trading_hours(self,data):
+    """
+    Filter the data to include only trading hours. 
+
+    Parameters: 
+    -------------
+      data (pd.DataFrame): The stock data to filter
+
+    Returns: 
+    ------------
+      pd.DataFrame: The filtered data containng only trading hours
+    """
+    
     trading_start = dt.time(9,0)
     trading_end = dt.time(17,30)
     trading_days = [0,1,2,3,4]
@@ -73,6 +125,14 @@ class GetStockDataTest:
     return data.sort_index(axis=1)
   
   def update_data(self):
+    """
+    Update stock data with new information if available. 
+
+    Returns:
+    ------------
+      pd.DataFrame: The updated DataFrame with new data included. 
+
+    """
     today = pd.Timestamp.now().date()  # Use pd.Timestamp to ensure compatibility
     current_time = pd.Timestamp.now().time()
     print(f"Updating data at {current_time} on {today}")
