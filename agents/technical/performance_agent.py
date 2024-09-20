@@ -105,9 +105,9 @@ class PerformanceBasedAgent(TradingAgent):
         continue
       
       # Select the top N stocks with the highest return 
-      top_stocks = period_returns.nsmallest(self.top_n).index.intersection(signals.columns)
+      top_stocks = period_returns.nlargest(self.top_n).index.intersection(signals.columns)
       #print(f"Date: {self.data.index[i]},Selected top stocks: {top_stocks}")
-
+      print(top_stocks)
       # Generate buy signals for the next holding period
       for j in range(self.holding_period):
         if i+j < len(signals):
