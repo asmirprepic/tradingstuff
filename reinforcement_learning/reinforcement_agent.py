@@ -117,7 +117,60 @@ class QLearningTradingAgent(TradingAgent):
       signals['return'] = np.log(self.data[stock]['Close'] / self.data[stock]['Close'].shift(1))
       self.signal_data[stock] = signals
 
+  def generate_signal_on_new_data(self,new_data):
+    """
+    Uses the trained Q-learning agent to generate trading signals on new data. 
+    Args: 
+      new_data (pd.DataFrame): New stock price data tp generate signals for. 
 
+    Returns: 
+      dict: A dictionary of trading signals for each stock
+    """
+    self.new_signal_data = {}
+
+    for stock in new_data.columns.get_level_values(0).unique():
+      # Create environment with new data for each stock 
+      environment = StockTradingEnviron(new_data[stock])
+      agent = self.agents[stock]
+      signals = pd.DataFrame(index = new_data[stock].index)
+      signals['Position'] = 0
+      signals['Signal'] = 0
+      last_position = None
+      hold_days = 0
+      min_hold_period = 5
+
+      # Initialize state for new data 
+      state = environment.reset()
+      last_action = 0
+
+      for step in range(len(new_data[stock])):
+        if hold_days >= min_hold_period:
+          action = agent.choose_action(state,hold_days,last_action)
+          hold_days = 0
+        else: 
+          action = last_action
+          hold_days += 1
+
+        position = 0 if action == 0 else (1 if action == 1 else -1)
+        signals['Position'].iloc[step] = position
+
+        # Generate buy sell signals based on change in action 
+        if last_position is not None and position != last_position: 
+          signals['Signal'].iloc[step] = 1 if position > last_position else -1
+
+        last_position = position
+        last_action = action
+
+        # Update state 
+        next_state,_,done = environment.step(action)
+        if done: 
+          break
+        state  = next_state
+
+        self.new_signal_data[stock] = signals
+
+        return self.new_signal_data
+  
   def train(self,stock, num_episodes=1000):
     """
         Trains the Q-learning agent for a specific stock over a given number of episodes.
