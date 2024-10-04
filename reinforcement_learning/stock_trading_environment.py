@@ -31,14 +31,26 @@ class StockTradingEnviron:
     return self._next_observation()
 
   def _next_observation(self):
+    """
+    Returns current state of the environment using specified features in this code. 
+
+    """
+    
     window_start = max(self.current_step - self.window_size + 1, 0)
     window_end = self.current_step + 1
     window_data = self.data.iloc[window_start:window_end]
+    
     avg_price = window_data.mean()
+    price_volatility = window_data.std()
+
+    moving_average_10 = self.data.rolling(window=5).mean().iloc[self.current_step]
+    relative_changes = window_data.pct_change().fillna(0)
+    state = np.array([avg_price,price_volatility,moving_average_5,relative_changes])
     state_index = self._discretize_price(avg_price)
+    
     return state_index
     
-    return self.data.iloc[window_start:window_end].values
+    #return self.data.iloc[window_start:window_end].values
   
   def _discretize_price(self, price):
     bin_index = int((price - self.min_price) / self.bin_width)
@@ -105,7 +117,7 @@ class StockTradingEnviron:
       current_price = self.data.iloc[self.current_step]
       
       if action == 1:  # Buy
-          reward = -self.data.iloc[self.current_step]  # Cost of buying
+          reward = 0 #-self.data.iloc[self.current_step]  # Cost of buying, or no reward since profits are not realized
           self.last_action_price = current_price
 
       elif action == 2 and self.current_step > 0: # Sell
@@ -113,11 +125,11 @@ class StockTradingEnviron:
           # Profit from selling (current price - last price)
           last_buy_price = self.data.iloc[self.current_step-1]
           reward = current_price - last_buy_price
-        self.last_action_price = current_price
+          self.last_action_price = None
           
       elif action == 0 : #Hold 
           if self.last_action_price is not None:
-            reward = current_price-self.last_action_price
+            reward = current_price-self.last_action_price # Reward is based on non-realized profits
             
 
     return reward
