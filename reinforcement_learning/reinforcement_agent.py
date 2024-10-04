@@ -86,7 +86,8 @@ class QLearningTradingAgent(TradingAgent):
       signals['Position'] = 0
       signals['Signal'] = 0
       last_position = None
-      
+      hold_days = 0
+      min_hold_period = 5
 
 
       # Define how the state is represented for each stock
@@ -95,14 +96,19 @@ class QLearningTradingAgent(TradingAgent):
 
       for step in range(len(self.data[stock])):
         #fromatted_state = self._format_state(state,step,stock)
-        action = agent.choose_action(state)
+        if hold_days < min_hold_period: 
+          action = last_action
+        else: 
+          action = agent.choose_action(state)
         position = 0 if action == 0 else (1 if action == 1 else -1)
-
         signals['Position'].iloc[step] = position
 
         # Generate signal based on change in action
         if last_position is not None and position != last_position:
           signals['Signal'].iloc[step] = 1 if position != 0 else -1
+          hold_days = 0
+        else: 
+          hold_days += 1
 
         last_position = position
 
