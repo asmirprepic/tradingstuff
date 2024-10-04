@@ -3,7 +3,7 @@ import pandas as pd
 
 
 class QLearningAgent:
-  def __init__(self, state_size, action_size, alpha=0.1, gamma=0.99, epsilon=1.0, epsilon_decay=0.995):
+  def __init__(self, state_size, action_size, alpha=0.1, gamma=0.99, epsilon=1.0, epsilon_decay=0.995,min_hold_period = 5):
     """
     Initializes the Q-learning agent.
 
@@ -34,7 +34,16 @@ class QLearningAgent:
         int: The chosen action.
     """
     
-    
+    # Enforcing minimum holding period
+    if hold_days < self.min_holding_period:
+      action = last_action
+    else:
+      # Exploration or exploitation
+      if np.random.rand() < self.epsilon:
+        action  = np.random.choice(self.action_size)
+      else: 
+        action = np.argmax(self.q_table[state])
+        
     #print(f"Current State: {state}")
     if np.random.rand() < self.epsilon:
         action =  np.random.choice(self.action_size)
@@ -67,6 +76,12 @@ class QLearningAgent:
 
     if not done and self.epsilon > 0.01:
         self.epsilon *= self.epsilon_decay
+
+  def reset(self):
+    """ Resetting the agents q_table"""
+    self.q_table = np.zeros((self.state_size,self.action_size))
+    self.epsilon = 1.0
+    
 
 
 
