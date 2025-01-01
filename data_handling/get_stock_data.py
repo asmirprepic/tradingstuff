@@ -59,8 +59,12 @@ class GetStockDataTest:
       prices = ticker.history(start = self.start_date,end = self.end_date,interval = self.interval)
       
       if not prices.empty:
-        prices = prices[self.data_types]
+        prices = prices[self.data_types].copy() 
+        #prices = prices[self.data_types]
+        
         prices['Stock'] = stock
+        print(prices.columns)
+        print(stock)
         all_data.append(prices)
       
     if not all_data:
@@ -94,13 +98,14 @@ class GetStockDataTest:
       if "m" in self.interval: 
         raw_data.set_index(['Date', 'Stock'], inplace=True)
       else: 
-        raw_data.set_index(['Datetime','Stock'],inplace = True)
+        raw_data.set_index(['Date','Stock'],inplace = True)
         
       raw_data = raw_data[self.data_types]
       processed_data = raw_data.unstack(level='Stock')
       processed_data.columns = processed_data.columns.swaplevel(0, 1)
       processed_data.sort_index(axis=1, level=0, inplace=True)
-      return processed_data
+      self.data = processed_data
+      
 
   
 
