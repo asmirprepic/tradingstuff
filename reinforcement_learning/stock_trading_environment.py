@@ -28,29 +28,18 @@ class StockTradingEnviron:
         np.array: The initial state of the environment.
     """
     self.current_step = 0
+    self.last_action_price = None
     return self._next_observation()
 
   def _next_observation(self):
-    """
-    Returns current state of the environment using specified features in this code. 
-
-    """
-    
     window_start = max(self.current_step - self.window_size + 1, 0)
     window_end = self.current_step + 1
     window_data = self.data.iloc[window_start:window_end]
-    
     avg_price = window_data.mean()
-    price_volatility = window_data.std()
-
-    moving_average_10 = self.data.rolling(window=5).mean().iloc[self.current_step]
-    relative_changes = window_data.pct_change().fillna(0)
-    state = np.array([avg_price,price_volatility,moving_average_5,relative_changes])
     state_index = self._discretize_price(avg_price)
-    
     return state_index
     
-    #return self.data.iloc[window_start:window_end].values
+    return self.data.iloc[window_start:window_end].values
   
   def _discretize_price(self, price):
     bin_index = int((price - self.min_price) / self.bin_width)
@@ -58,7 +47,7 @@ class StockTradingEnviron:
 
   def _get_state_index(self,price):
     bin_index = int((price-self.data.min())/self.bin_width)
-    return min(bin_index,self.num_state_bins-1)
+    return max(0,min(bin_index,self.num_state_bins-1))
 
   def step(self, action):
     """
@@ -99,7 +88,8 @@ class StockTradingEnviron:
     return discretisized_state.values.flatten()
 
   def _calculate_reward(self, action):
-    """<s
+    
+    """
     Calculates the reward based on the action taken.
 
     Args:
@@ -117,20 +107,28 @@ class StockTradingEnviron:
       current_price = self.data.iloc[self.current_step]
       
       if action == 1:  # Buy
-          reward = 0 #-self.data.iloc[self.current_step]  # Cost of buying, or no reward since profits are not realized
+          #reward = -self.data.iloc[self.current_step]  # Cost of buying
+          reward = -1 # small penalty for buying
           self.last_action_price = current_price
 
-      elif action == 2 and self.current_step > 0: # Sell
+      elif action == 2: # Sell
         if self.last_action_price is not None: 
           # Profit from selling (current price - last price)
           last_buy_price = self.data.iloc[self.current_step-1]
           reward = current_price - last_buy_price
           self.last_action_price = None
+        else: 
+          reward = -5
+        
           
       elif action == 0 : #Hold 
           if self.last_action_price is not None:
-            reward = current_price-self.last_action_price # Reward is based on non-realized profits
-            
+            reward = current_price-self.last_action_price
+          else: 
+            reward = 0            
+
+      if np.isnan(reward) or np.isinf(reward):
+        reward = 0
 
     return reward
 
