@@ -18,18 +18,32 @@ class MultiStockTradingEnvironment:
     self.max_positions = max_positions
     self.window_size = window_size 
     self.transaction_fee = transaction_fee
-    
     self.stocks = stock_data.index.get_level_values(0).unique()
-
     self.current_step = 0
     self.open_positions = {}
-    self.balance = 10000000
+    self.balance = 10_000_000
     self.initial_balance = self.balance
     self.trade_log = []
-
+    self.trade_history = []
+    self.holdings = {}
     self.normalized_data = self._normalize_data()
     
-    
+  def reset(self):
+    """
+      Reset the environment for a new episode.
+
+      Returns:
+          np.array: The initial state of the environment.
+    """
+    self.current_step = 0
+    self.open_positions = {}  # {stock: holding_duration}
+    self.balance = self.initial_balance
+    self.trade_log = []
+    self.trade_history = []
+    self.holdings = {}
+
+    return self._get_state()
+
   
   def _normalize_data(self):
     """ 
@@ -49,20 +63,7 @@ class MultiStockTradingEnvironment:
 
     return normalized_data
 
-  def reset(self):
-    """
-      Reset the environment for a new episode.
-
-      Returns:
-          np.array: The initial state of the environment.
-    """
-    self.current_step = 0
-    self.open_positions = {}  # Empty portfolio
-    self.balance = self.initial_balance
-    self.trade_log = []
-
-    return self._get_state()
-
+  
   def _get_state(self):
     """
     Construct the current state vector.
@@ -97,9 +98,9 @@ class MultiStockTradingEnvironment:
         momentum[stock] = 0 # Not enough data adjustment
       
       else: 
-        current_price = self.stock_data.loc[stock,'Close'].iloc[self.current_step]
+        current_price = self.stock_data.loc[stock,'Close'].iloc[self.current_step-1]
         past_price = self.stock_data.loc[stock,'Close'].iloc[self.current_step- self.window_size]
-        momentum[stock] = (current_price - past_price)/(past_price)
+        momentum[stock] = (current_price - past_price) / past_price if past_price != 0 else 0
     return sorted(momentum.keys(), key = lambda x: momentum[x],reverse = True) # Rank stock by momentum
 
   def step(self,actions):
@@ -134,18 +135,28 @@ class MultiStockTradingEnvironment:
             self.balance -= current_price *( 1 + self.transaction_fee)
             rewards[stock] = -self.transaction_fee * current_price
             self.trade_log.append(f"BUY {stock} at {current_price}")
-          
+            self.holdings[stock] = 0
+            self.trade_history.append({
+                "Stock": stock, "Action": "BUY", "Price": current_price, "Step": self.current_step
+            })
+        
           else: 
             rewards[stock] = -2
+            
       elif action == 2:
         if stock in self.open_positions:
-          buy_price = self.open_positions[stock]
+          buy_price,buy_step = self.open_positions[stock]
           profit = current_price - buy_price
+          holding_period = self.current_step - buy_step
           rewards[stock] = profit - self.transaction_fee * current_price
           self.balance += current_price*(1-self.transaction_fee)
           del self.open_positions[stock]
+          del self.holdings[stock]
           self.trade_log.append(f"SELL {stock} at {current_price}, Profit: {profit}")
-        
+          self.trade_history.append({
+                          "Stock": stock, "Action": "SELL", "Price": current_price, "Step": self.current_step,
+                          "Held_For": holding_period, "Profit": profit
+                      })
         else: 
           rewards[stock] = -5
       
@@ -155,12 +166,18 @@ class MultiStockTradingEnvironment:
         else:
           rewards[stock] = 0
 
+    for held_stock in self.holdings.keys():
+      self.holdings[held_stock] += 1
+
     self.current_step += 1
     done = self.current_step >= len(self.stock_data.loc[self.stocks[0]]) -1
     next_state = self._get_state() if not done else None
     total_reward = sum(rewards.values())
 
     return next_state,total_reward,done
+
+  
+    
 
 
 
