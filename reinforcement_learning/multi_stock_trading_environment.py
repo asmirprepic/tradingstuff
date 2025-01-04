@@ -37,8 +37,15 @@ class MultiStockTradingEnvironment:
     """
     normalized_data ={}
     for stock in self.stocks:
-      stock_prices = self.stock_data.loc[stock]['Close']
-      normalized_data[stock] = (stock_prices - stock_prices.min())/(stock_prices.max() - stock_prices.min())
+      stock_prices = self.stock_data.loc[stock]['Close'].ffill()
+      min_price = stock_prices.min()
+      max_price = stock_prices.max()
+
+      if max_price - min_price == 0: 
+        normalized_data[stock] = stock_prices*0
+      
+      else: 
+        normalized_data[stock] = (stock_prices - min_price)/(max_price - min_price)
 
     return normalized_data
 
@@ -95,7 +102,7 @@ class MultiStockTradingEnvironment:
         momentum[stock] = (current_price - past_price)/(past_price)
     return sorted(momentum.keys(), key = lambda x: momentum[x],reverse = True) # Rank stock by momentum
 
-  def step(self):
+  def step(self,actions):
     """
     Execute the actions chosen by the agent.
 
@@ -108,10 +115,16 @@ class MultiStockTradingEnvironment:
         tuple: (next_state, total_reward, done)
     """
     rewards = {}
-    # Rannk stocks to priortize
-    ranked_stocks = self._rank_stocks()
+    ranked_stocks = self._rank_stocks() # Rank stocks to priortize
 
-    for stock,action in action.items():
+    for stock,action in actions.items():
+      
+      if stock not in self.stock_data.index.get_level_values(0):
+        continue # Ignore unknown stock
+
+      if self.current_step >= len(self.stock_data.loc[stock])-1:
+        continue # Preventing out of bounds
+
       current_price = self.stock_data.loc[stock]['Close'].iloc[self.current_step]
 
       if action == 1:
@@ -129,7 +142,7 @@ class MultiStockTradingEnvironment:
           buy_price = self.open_positions[stock]
           profit = current_price - buy_price
           rewards[stock] = profit - self.transaction_fee * current_price
-          self.balance += current_price*(1+self.transaction_fee)
+          self.balance += current_price*(1-self.transaction_fee)
           del self.open_positions[stock]
           self.trade_log.append(f"SELL {stock} at {current_price}, Profit: {profit}")
         
