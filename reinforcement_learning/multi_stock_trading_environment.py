@@ -27,7 +27,7 @@ class MultiStockTradingEnvironment:
     self.initial_balance = self.balance
     self.trade_log = []
 
-    self.normalized_data = self._normalize_data
+    self.normalized_data = self._normalize_data()
     
     
   
