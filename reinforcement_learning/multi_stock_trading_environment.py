@@ -18,9 +18,10 @@ class MultiStockTradingEnvironment:
     self.max_positions = max_positions
     self.window_size = window_size 
     self.transaction_fee = transaction_fee
-    self.stocks = stock_data.index.get_level_values(0).unique()
+    self.stocks = stock_data.columns.get_level_values(0).unique()
     self.current_step = 0
     self.open_positions = {}
+
     self.balance = 10_000_000
     self.initial_balance = self.balance
     self.trade_log = []
@@ -51,7 +52,8 @@ class MultiStockTradingEnvironment:
     """
     normalized_data ={}
     for stock in self.stocks:
-      stock_prices = self.stock_data.loc[stock]['Close'].ffill()
+      
+      stock_prices = self.stock_data[stock]['Close'].ffill()
       min_price = stock_prices.min()
       max_price = stock_prices.max()
 
@@ -75,17 +77,34 @@ class MultiStockTradingEnvironment:
             - Number of held stocks (normalized)
     """
     state = []
+
     for stock in self.stocks:
-      price_series = self.normalized_data[stock]
-      window_start = max(0,self.current_step-self.window_size)
-      stock_prices = price_series.iloc[window_start:self.current_step].values
-      state.extend(stock_prices)
-    
+        if stock not in self.normalized_data:
+            print(f"Warning: Missing {stock} in normalized data, skipping ...")
+            continue
+
+        price_series = self.normalized_data[stock]
+        window_start = max(0, self.current_step - self.window_size)
+
+        # Ensure fixed window size by padding with the first available price
+        if self.current_step < self.window_size:
+            padding_needed = self.window_size - self.current_step
+            stock_prices = np.concatenate([
+                np.full((padding_needed,), price_series.iloc[0]),  # Pad with first price
+                price_series.iloc[:self.current_step].values
+            ])
+        else:
+            stock_prices = price_series.iloc[window_start:self.current_step].values
+        
+        state.extend(stock_prices)
+
     # Portfolio info
-    state.append(self.balance/self.initial_balance)
+    state.append(self.balance / self.initial_balance)
     state.append(len(self.open_positions) / self.max_positions)
 
-    return np.array(state,dtype= np.float32)
+    state_array = np.array(state, dtype=np.float32)
+
+    return state_array
   
   def _rank_stocks(self):
     """ Ranking stocks based on momentum and price actions to prioritize better buy selection """
@@ -98,8 +117,8 @@ class MultiStockTradingEnvironment:
         momentum[stock] = 0 # Not enough data adjustment
       
       else: 
-        current_price = self.stock_data.loc[stock,'Close'].iloc[self.current_step-1]
-        past_price = self.stock_data.loc[stock,'Close'].iloc[self.current_step- self.window_size]
+        current_price = self.stock_data[stock,'Close'].iloc[self.current_step-1]
+        past_price = self.stock_data[stock,'Close'].iloc[self.current_step- self.window_size]
         momentum[stock] = (current_price - past_price) / past_price if past_price != 0 else 0
     return sorted(momentum.keys(), key = lambda x: momentum[x],reverse = True) # Rank stock by momentum
 
@@ -120,18 +139,19 @@ class MultiStockTradingEnvironment:
 
     for stock,action in actions.items():
       
-      if stock not in self.stock_data.index.get_level_values(0):
+      if stock not in self.stock_data.columns.get_level_values(0):
         continue # Ignore unknown stock
 
-      if self.current_step >= len(self.stock_data.loc[stock])-1:
+      
+      if self.current_step >= len(self.stock_data[(stock, 'Close')]) - 1:
         continue # Preventing out of bounds
 
-      current_price = self.stock_data.loc[stock]['Close'].iloc[self.current_step]
+      current_price = self.stock_data[stock]['Close'].iloc[self.current_step]
 
       if action == 1:
-        if len(self.open_positions) < self.max_positions and self.balance >= self.current_price:
+        if len(self.open_positions) < self.max_positions and self.balance >= current_price:
           if stock in ranked_stocks[:self.max_positions]:
-            self.open_positions[stock] = current_price
+            self.open_positions[stock] = (current_price, self.current_step)  # CORRECT
             self.balance -= current_price *( 1 + self.transaction_fee)
             rewards[stock] = -self.transaction_fee * current_price
             self.trade_log.append(f"BUY {stock} at {current_price}")
@@ -162,7 +182,7 @@ class MultiStockTradingEnvironment:
       
       elif action == 0:
         if stock in self.open_positions:
-          rewards[stock] = current_price - self.open_positions[stock]
+          rewards[stock] = current_price - self.open_positions[stock][0]
         else:
           rewards[stock] = 0
 
@@ -170,20 +190,9 @@ class MultiStockTradingEnvironment:
       self.holdings[held_stock] += 1
 
     self.current_step += 1
-    done = self.current_step >= len(self.stock_data.loc[self.stocks[0]]) -1
+    done = self.current_step >= len(self.stock_data[(self.stocks[0], 'Close')]) - 1
     next_state = self._get_state() if not done else None
     total_reward = sum(rewards.values())
 
     return next_state,total_reward,done
-
-  
-    
-
-
-
-
-
-  
-
-
   
