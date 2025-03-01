@@ -87,6 +87,19 @@ class TransformerTradingAgent(TradingAgent):
       index (pd.Index): Index for the test set predictions
 
     """
+    X,Y,index = self.create_classification_trading_condition(stock)
+    X_train,Y_train,X_test,Y_test = self.create_train_split_group(X,Y,split_ratio = 0.9)
+    X_train_tensor = torch.tensor(X_train,dtype = torch.float32)
+    Y_train_tensor = torch.tensor(Y_train,dtype = torch.long)
+
+    model = TranformerClassifier(
+      input_dim = self.model_params['input_dim'],
+      model_dim = self.model_params['model_dim'],
+      num_heads = self.model_params['num_heads'],
+      num_layers = self.model_params['num_layers'],
+      num_classes = self.model
+    )
+      
     
 
 
