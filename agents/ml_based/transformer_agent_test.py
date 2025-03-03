@@ -99,6 +99,23 @@ class TransformerTradingAgent(TradingAgent):
       num_layers = self.model_params['num_layers'],
       num_classes = self.model
     )
+
+    optimizer = optim.Adam(model.parameters(),lr =1e-3)
+    criterion = nn.CrossEntropy()
+    model.train()
+
+    batch_size = 32
+    dataset = torch.utils.data.TensorDataSet(X_train_tensor,Y_train_tensor)
+    dataloader = torch.utils.data.DataLoader(dataset,batch_size = batch_size, shuffle = True)
+
+    for epoch in range(self.epochs):
+      for batch_X, batch_Y in dataLoader:
+        optimizer.zero_grad()
+        logits = model(batch_X)
+        loss = criterion(logits,batch_Y)
+        loss.backward()
+        optimizer.step()
+    return model,index
       
     
 
