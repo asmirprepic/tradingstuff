@@ -116,8 +116,34 @@ class TransformerTradingAgent(TradingAgent):
         loss.backward()
         optimizer.step()
     return model,index
-      
-    
+
+def generate_signal_strategy(self,stock):
+  """
+  Generates trading signals for the specified stock using the trained Transformer classifer
+  Predictions are converted to positions and then signals are then computed based on changes in positions.
+  The generated signal dataframe is stored in self.signal_data
+
+  """
+
+  X,_,index = self.create_classification_trading_condition(stock)
+  model,index = self.transformer_model(stock)
+  model.eval()
+  X_tensor = torch.tensor(X,dtype = torch.float32)
+  with torch.no_grad():
+    logits = model(X_tensor)
+    predictions = torch.argmax(logits,dim =1).cpu().numpy()
+
+  signals = pd.DataFrame(index = index)
+  signals['Predictions'] = predictions
+  signals['Position'] = signals['Predictions'].apply(lambda x: 1 if x == 1 else 0)
+  signals['Signal'] = 0
+  signals.loc[signals['Position'] > signals['Position'].shift(1),'Signal'] = 1
+  signals.loc[signals['Position'] > signals['Position'].shift(1),'Signal'] = -1
+
+  signals['return'] = np.log(self.data[(stock, 'Close')] / self.data[(stock, 'Close')].shift(1))
+  self.signal_data[stock] = signals
+
+  
 
 
 
