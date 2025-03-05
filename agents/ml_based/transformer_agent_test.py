@@ -36,6 +36,11 @@ class TransformerTradingAgent(TradingAgent):
       self.model_params = model_params
       self.epochs = epochs
 
+      # Note to self. Implement this so that its not immediately trained. Also implement such that the model is trained beforehand.
+      #for stock in self.stocks_in_data: 
+      #  self.generate_signal_strategy(stock):
+        
+
   def create_classification_trading_condition(self,stock):
     """
     Constructs sequences of features and corresponding targets for the given stock. 
