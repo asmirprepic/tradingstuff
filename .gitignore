@@ -1,0 +1,5 @@
+venv_tf/
+__pycache__/
+*.pyc
+.DS_Store
+.env

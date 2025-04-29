@@ -1,8 +1,9 @@
+
 import pandas as pd
 import yfinance as yf
 import datetime as dt
 
-class GetStockData:
+class GetStockDataTest:
   """  
   A class to fetch and process stock data from Yahoo Finance. 
 
@@ -49,35 +50,29 @@ class GetStockData:
     """   
     Fetch and process historical stock data for the given parameters
     """
+   
     if self.start_date > self.end_date:
         raise ValueError("Start date must be earlier than end date.")
 
     all_data = []
     for stock in self.stocks:
-        try:
-            ticker = yf.Ticker(stock)
-            prices = ticker.history(start=self.start_date, end=self.end_date, interval=self.interval)
-
-            if prices.empty:
-                print(f"No data for {stock}. Skipping...")
-                continue
-
-            prices = prices[self.data_types].copy()
-            prices['Stock'] = stock
-            all_data.append(prices)
-            print(f"Successfully fetched data for {stock}")  # Log successful fetch
-        except Exception as e:
-            print(f"Error fetching data for {stock}]: {e}")  # Log any errors
-
+      ticker = yf.Ticker(stock)
+      prices = ticker.history(start = self.start_date,end = self.end_date,interval = self.interval)
+      
+      if not prices.empty:
+        prices = prices[self.data_types]
+        prices['Stock'] = stock
+        all_data.append(prices)
+      
     if not all_data:
-        return pd.DataFrame()
-
+      return pd.DataFrame()
+    
     combined_data = pd.concat(all_data)
-    combined_data.index = pd.to_datetime(combined_data.index)
+    combined_data.index=pd.to_datetime(combined_data.index)
 
-    if self.interval.endswith('m') or self.interval.endswith('h'):
-        combined_data = self._filter_trading_hours(combined_data)
-
+    if self.interval.endswith('m'):
+            combined_data = self._filter_trading_hours(combined_data)
+    
     return self._process_yfinance_data(combined_data)
 
   def _process_yfinance_data(self, raw_data):
@@ -95,10 +90,10 @@ class GetStockData:
       if raw_data.empty:
           print("Warning: No data available for the specified data types and stocks.")
           return pd.DataFrame()  # Or handle this case differently based on your needs
-      
+
       raw_data.reset_index(inplace=True)
-      if "m" in self.interval or "h" in self.interval: 
-        raw_data.set_index(['Datetime', 'Stock'], inplace=True)
+      if "m" in self.interval: 
+        raw_data.set_index(['Date', 'Stock'], inplace=True)
       else: 
         raw_data.set_index(['Date','Stock'],inplace = True)
         
@@ -106,8 +101,9 @@ class GetStockData:
       processed_data = raw_data.unstack(level='Stock')
       processed_data.columns = processed_data.columns.swaplevel(0, 1)
       processed_data.sort_index(axis=1, level=0, inplace=True)
-      self.data = processed_data
-      
+      return processed_data
+
+  
 
   def _filter_trading_hours(self,data):
     """
@@ -174,4 +170,3 @@ class GetStockData:
             self.data = pd.concat([self.data, new_data[~new_data.index.isin(self.data.index)]])
 
     return self.data
-
