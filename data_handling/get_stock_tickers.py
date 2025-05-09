@@ -1,6 +1,6 @@
 import pandas as pd
 import requests
-
+import time
 
 class GetTickers:
   def __init__(self):
@@ -10,6 +10,8 @@ class GetTickers:
 
   def _getTickers(self,region,market_cap_min= None, market_cap_max = None):
     market_cap_filters = []
+
+    time.sleep(10)
 
     if market_cap_min is not None and market_cap_max is not None:
         market_cap_filter = [{
@@ -141,6 +143,7 @@ class GetTickers:
 
     # Loop through the cap ranges
     for min_cap, max_cap, cap_label in cap_ranges:
+        time.sleep(10)
         # Get the tickers for this cap range
         tickers_json = self._getTickers(region, min_cap, max_cap)
         
