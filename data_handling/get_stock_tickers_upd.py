@@ -29,20 +29,22 @@ class GetTickers:
         """Initialize the session and fetch cookies and crumb."""
         self.retries = retries
         self.session = requests.Session()
-        self.session.headers.update({
-            'accept': '*/*',
-            'accept-language': 'en-US,en;q=0.9',
-            'content-type': 'application/json',
-            'origin': 'https://finance.yahoo.com',
-            'referer': 'https://finance.yahoo.com/screener/',
-            'sec-ch-ua': '"Chromium";v="136", "Microsoft Edge";v="136", "Not.A/Brand";v="99"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-site',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0',
-        })
+        # self.session.headers.update({
+        #     'accept': '*/*',
+        #     'accept-language': 'en-US,en;q=0.9',
+        #     'content-type': 'application/json',
+        #     'origin': 'https://finance.yahoo.com',
+        #     'referer': 'https://finance.yahoo.com/screener/',
+        #     'sec-ch-ua': '"Chromium";v="136", "Microsoft Edge";v="136", "Not.A/Brand";v="99"',
+        #     'sec-ch-ua-mobile': '?0',
+        #     'sec-ch-ua-platform': '"Windows"',
+        #     'sec-fetch-dest': 'empty',
+        #     'sec-fetch-mode': 'cors',
+        #     'sec-fetch-site': 'same-site',
+        #     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0',
+        # })
+
+        self._update_headers()
         self.cookies = None
         self.crumb = None
         self.market_cap_ranges = [
@@ -55,28 +57,57 @@ class GetTickers:
         ]
         self._initialize_session()
 
+    def _update_headers(self) -> None:
+        """Update session headers to mimic a modern browser"""
+        self.session.headers.update({
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Referer': 'https://finance.yahoo.com/',
+        })
+        
     def  _initialize_session(self) -> None:
         """Fetches cookeis and crumb"""
-        try:
-            logger.info(f"Fetching cookies from {self.LANDING_PAGE}")
-            response = self.session.get(self.LANDING_PAGE)
-            response.raise_for_status()
-            self.cookies = self.session.cookies.get_dict()
-            logger.info(f"Cookies fetched {self.cookies.keys()}")
+        required_cookies = {'A1','A3','GUC'}
+        for attempt in range(self.retries):
+            try:
+                logger.info(f"Fetching cookies from {self.LANDING_PAGE}")
+                response = self.session.get(self.LANDING_PAGE)
+                response.raise_for_status()
+                self.cookies = self.session.cookies.get_dict()
+                logger.info(f"Cookies fetched {self.cookies.keys()}")
 
-            logger.info(f"Fetching crumb from {self.CRUMB_URL}")
-            time.sleep(1) # Rate limiting
-            response = self.session.get(self.CRUMB_URL)
-            response.raise_for_status()
-            self.crumb = response.text.strip()
+                if not all(cookie in self.cookies for cookie in required_cookies):
+                    logger.warning(f"Missing cookies: {required_cookies - set(self.cookies.keys())}")
+                    if attempt < self.retries - 1:
+                        time.sleep(attempt **2)
+                        continue
+                    raise ValueError("Failed to fetch required cookies")
+                
+                logger.info(f"Fetching crumb from {self.CRUMB_URL}")
+                time.sleep(1) # Rate limiting
+                response = self.session.get(self.CRUMB_URL,timeout= 10)
+                response.raise_for_status()
+                self.crumb = response.text.strip()
+                if not self.crumb:
+                    raise ValueError("Empty crumb received")
+                logger.info(f"Crumb fetched successfully {self.crumb}")
+                return
+    
+            except (requests.RequestException,ValueError) as e:
+                logger.info(f"Attempt {attempt+1} failed, response: {response.text if 'response' in locals() else 'No response'}")
+                if attempt == self.retries - 1:
+                    logger.error("All retries failed to initialize session")
+                    raise RuntimeError("Could not fetch cookies or crumb") from e
+                time.sleep(2 ** attempt)
 
-            if not self.crumb:
-                raise ValueError("Empty crumb received")
-            logger.info("Crumb fetched successfully")
-        except (requests.RequestException,ValueError) as e:
-            logger.error(f"Failed to initalize session: {e}")
-            raise RuntimeError("Could not fetch cookies or crumb") from e
-        
     def _bulid_market_cap_filter(self,min_cap: int,max_cap: Optional[int]) -> List[Dict]:
         """Build market cap filter for API query""" 
         if max_cap is None:
