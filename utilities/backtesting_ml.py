@@ -1,5 +1,7 @@
 
-class BacktestingML(self,window = 252):
+import pandas as pd
+
+class BacktestingML(window = 252):
 
   """
   Backtesting framework that periodically refits models using a rolling or walk-forward approach.
@@ -55,7 +57,7 @@ class BacktestingML(self,window = 252):
       # Save results to portfolio 
       signals_df = pd.DataFrame(index = stock_close.index[self.window:])
       signals_df['Holdings'] = holdings
-      singals_df['Cash'] = cash
+      signals_df['Cash'] = cash
       signals_df['Total'] = total
       signals_df['Returns'] = signals_df['Total'].pct_change().fillna()
       self.portfolio[(name,stock)]  = signals_df['Total']

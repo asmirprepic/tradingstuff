@@ -8,7 +8,8 @@ import numpy as np
 
 # %%
 from data_handling.get_stock_data import GetStockDataTest
-from tradingstuff.data_handling.get_stock_tickers import GetTickers
+from data_handling.get_stock_tickers_upd import GetTickers
+
 
 # %%
 getTickers = GetTickers()

@@ -60,7 +60,7 @@ class BackTesting:
 
       performance.loc[(name,stock), 'Total returns'] = total_return*100
 
-  return performance
+    return performance
 
   def plot_performance(self):
     """
