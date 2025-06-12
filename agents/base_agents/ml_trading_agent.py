@@ -1,4 +1,4 @@
-from abc import ABC, abstracthmethod
+from abc import ABC, abstractmethod
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -34,7 +34,7 @@ class MLBasedAgent(TradingAgent):
 
     super().__init__(data)
     self.algorithm_name = 'MLBaseAlgorithm'
-    self.feature = features
+    self.features = features
     self.trained = False
 
   def create_classification_trading_condition(self,stock):
@@ -52,12 +52,12 @@ class MLBasedAgent(TradingAgent):
     """
 
     data_copy = self.data[stock].copy()
-    data_copy['High-low'] = self.data[stock]['High'] - self.data[stock]['Low']
+    data_copy['High-Low'] = self.data[stock]['High'] - self.data[stock]['Low']
     data_copy['Open-Close'] = self.data[stock]['Open'] - self.data[stock]['Close']
     data_copy.ffill()
 
     X = data_copy[['High-Low','Open-Close']]
-    Y = np.where(self.data[stock]['Close'].shift(-1) > self.data['Close'],1,-1)
+    Y = np.where(self.data[stock]['Close'].shift(-1) > self.data[stock]['Close'],1,-1)
     Y_series = pd.Series(Y,index = self.data[stock].index)
     Y = Y_series.loc[X.index]
 
@@ -100,7 +100,7 @@ class MLBasedAgent(TradingAgent):
     # Assuming that the last observation will hold without any fluctuations.
     data_copy.ffill(inplace = True)
 
-    X = self.data_copy[self.features]
+    X = data_copy[self.features]
     # Target variable based on next periods price movement. Used for classification
     Y = np.where(self.data[stock]['Close'].shift(-1) > self.data[stock]['Close'],1,-1)
     Y_series = pd.Series(Y,index = self.data[stock].index)
@@ -156,11 +156,11 @@ class MLBasedAgent(TradingAgent):
     y_pred = self.model.predict(X_test)
 
     metrics = {
-      'accuracy' : accuracy_score(y_test,y_pred),
-     # 'precision' = precision_score(y_test,y_pred),
-     # 'recall' = recall_score(y_test,y_pred),
-     # 'f1_score' = f1_score(y_test,y_pred)
-    }
+    'accuracy': accuracy_score(y_test, y_pred),
+    'precision': precision_score(y_test, y_pred),
+    'recall': recall_score(y_test, y_pred),
+    'f1_score': f1_score(y_test, y_pred)
+  }
     print(f"Model Performance metrics for {stock} ({self.algorithm_name}):")
     for metric,value in metrics.items():
       print(f"{metric}: {value:.4f}")
@@ -202,8 +202,7 @@ class MLBasedAgent(TradingAgent):
     X,_ = self.feature_engineering(stock)
     predictions = self.model.predict(X)
 
-    signals = pd.DataFrame(index = self.data.index)
-    signals = signals.loc[X.index]
+    signals = pd.DataFrame(index=X.index)
     signals['Prediction'] = predictions
     signals['Position'] = signals['Prediction'].apply(lambda x: 1 if x > 0.55 else 0)
 
@@ -211,7 +210,7 @@ class MLBasedAgent(TradingAgent):
     signals['Signal'] = 0
     signals.loc[signals['Position'] > signals['Position'].shift(1),'Signal'] = 1
     signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
-    signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
+    signals['return'] = np.log(self.data[(stock,'Close')].loc[X.index] / self.data[(stock,'Close')].shift(1).loc[X.index])
 
     return signals
     
