@@ -24,9 +24,8 @@ class KNNAgent(TradingAgent):
       self.algorithm_name = 'KNN'
       self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
-      for stock in self.stocks_in_data:
-          self.generate_signal_strategy(stock)
-      self.calculate_returns()
+      self.models = {} # Storing the trained models
+      self.signal_data = {}
 
   def create_classification_trading_condition(self, stock):
       """
@@ -48,8 +47,8 @@ class KNNAgent(TradingAgent):
       data_copy.dropna(inplace=True)
 
       X = data_copy[['Open-Close', 'High-Low']]
-      Y = np.where(self.data[stock]['Close'].shift(-1) > self.data[stock]['Close'], 1, -1)
-      Y_series = pd.Series(Y, index=self.data[stock].index)
+      Y = np.where(data_copy['Close'].shift(-1) > data_copy['Close'], 1, -1)
+      Y_series = pd.Series(Y, index=data_copy.index)
       Y = Y_series.loc[X.index]
 
       return X, Y
@@ -84,36 +83,85 @@ class KNNAgent(TradingAgent):
       knn.fit(X_train, Y_train)
 
       return knn
+  
+  def train_model(self,stock,split_ratio=0.8):
+      X,Y = self.create_classification_trading_condition(stock)
+      X_train, X_test, Y_train, Y_test = self.create_train_split_group(X,Y,split_ratio)
 
-  def generate_signal_strategy(self, stock):
-      """
-      Generates trading signals for the specified stock using the trained KNN model.
-      A signal is generated for each day based on the predicted direction of the stock price.
+      knn = KNeighborsClassifier(n_neighbors=15)
+      knn.fit = (X_train,Y_train)
 
-      Args:
-          stock (str): The stock symbol for which to generate signals.
+      self.models[stock] = knn
 
-      The method updates the `signal_data` attribute with signals for the given stock.
-      """
-      signals = pd.DataFrame(index=self.data.index)
-      X, _ = self.create_classification_trading_condition(stock)
-      knn = self.KNN_model(stock)
-      prediction = knn.predict(X)
-      signals = signals.loc[X.index]
-      signals['Prediction'] = prediction
-      signals['Position'] = signals['Prediction'].apply(lambda x: 1 if x == 1 else 0)
-      
-      # Calculate Signal as the change in position
-      signals['Signal'] = 0
-      signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
-      signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
+      return knn,X_train, X_test, Y_train, Y_test
 
-      
-      signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
-      
-      self.signal_data[stock] = signals
+  def generate_signal_strategy(self, stock, mode = 'backtest'):
+    """
+    Generates trading signals for the specified stock using the trained KNN model.
+    A signal is generated for each day based on the predicted direction of the stock price.
 
+    Args:
+        stock (str): The stock symbol for which to generate signals.
 
+    The method updates the `signal_data` attribute with signals for the given stock.
+    """
+
+    if stock not in self.models:
+        knn, X_train, X_test, Y_train, Y_test = self.train_model(stock)
+    else:
+        knn = self.models[stock]
+        X, Y = self.create_classification_trading_condition(stock)
+        X_train, X_test, Y_train, Y_test = self.create_train_split_group(X, Y, split_ratio=0.8)
+
+    if mode == 'backtest':
+        X_pred = X_test
+        index_used = X_test.index
+        print(f"[{stock}] Generating BACKTEST signals on TEST set ({len(X_test)} samples).")
+    elif mode == 'live':
+        X, _ = self.create_classification_trading_condition(stock)
+        X_pred = X
+        index_used = X.index
+        print(f"[{stock}] Generating LIVE signals on FULL set ({len(X)} samples).")
+    else:
+        raise ValueError("mode must be 'backtest' or 'live'.")
+    
+    predictions = knn.predict(X_pred)
+
+    signals = pd.DataFrame(index=index_used)
+    signals['Prediction'] = predictions
+    signals['Position'] = signals['Prediction'].apply(lambda x: 1 if x == 1 else 0)
+
+    signals['Signal'] = 0
+    signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
+    signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
+
+    signals['return'] = np.log(self.data[(stock, 'Close')].loc[index_used] /
+                                self.data[(stock, 'Close')].shift(1).loc[index_used])
+
+    # Store signals
+    self.signal_data[stock] = signals
+
+    def generate_signals(self,stocks = None):
+        """
+        Generates signals for selected stocks or all stocks
+
+        Args: 
+            stocks (list or None): List of stocks symbols to generate signals for.
+            If none, generate for all stocks in data
+        
+        """
+
+        if stocks is None:
+            stocks = self.stocks_in_data
+        elif isinstance(stocks,str):
+            stocks = [stocks]
+
+        for stock in stocks:
+            if stock not in self.stocks_in_data:
+                print(f"[Warning] Stock {stock} not found in data. Skipping.")
+                continue
+            print(f"Generating signals for {stock}")
+            self.generate_signal_strategy(stock)
 
 
 
