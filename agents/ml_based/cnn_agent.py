@@ -3,15 +3,16 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv1D,MaxPooling1D,Flatten,Dense
 from sklearn.preprocessing import MinMaxScaler
-
+import numpy as np
+import pandas as pd
 
 class CNNAgent(TradingAgent):
   """
-  A trading agent that uses convolutional neural network to generate trading signals. 
+  A trading agent that uses convolutional neural network to generate trading signals.
   This agent employs a neural network model based on price movement features to predict
-  the direction of the stock price movement. 
+  the direction of the stock price movement.
 
-  Attributes: 
+  Attributes:
     algorithm_name(string): Name of the algorithm implementet, set to "CNN"
     stocks_in_data (pd.Index): Unique stock symbols present in the data
     signal_data (dict): A dictionary to store signal data for each stock
@@ -32,10 +33,10 @@ class CNNAgent(TradingAgent):
     Creates a feature set for the CNN model. The features include
     'Open-Close' and 'High-low'
 
-    Args: 
-      stock(str): The stock symbol for which to create features. 
+    Args:
+      stock(str): The stock symbol for which to create features.
 
-    Returns: 
+    Returns:
       pd.DataFrame: the feature set
       pd.Series: The target variable, where 1 indicates an upward price movement and -1 indicates a downward price movement
     """
@@ -56,10 +57,10 @@ class CNNAgent(TradingAgent):
       """
       Splits the dataset into test and train set
 
-      Args: 
+      Args:
         X (np.ndarray): The feature set
         Y (np.ndarray): The target variable
-        split_ratio (float): The proportion of the dataset to in include in the train test split. 
+        split_ratio (float): The proportion of the dataset to in include in the train test split.
       """
       split_index = int(len(X)*split_ratio)
       X_train,X_test = X[:split_index], X[split_index:]
@@ -69,11 +70,11 @@ class CNNAgent(TradingAgent):
 
     def prepare_cnn_data(self,X,time_steps):
       """
-      Prepares the data for CNN input by creating sequences of the specified time steps. 
+      Prepares the data for CNN input by creating sequences of the specified time steps.
 
-      Args: 
-        X (np.ndarray): The feature set. 
-        time_steps (int): The number of time steps to include in each sequence. 
+      Args:
+        X (np.ndarray): The feature set.
+        time_steps (int): The number of time steps to include in each sequence.
 
       Returns:
         np.ndarray: The reshaped feature set suitable for CNN input.
@@ -85,12 +86,12 @@ class CNNAgent(TradingAgent):
 
     def CNN_model(self,stock):
       """
-      Trains the CNN model for the specified stock. 
+      Trains the CNN model for the specified stock.
 
-      Args: 
+      Args:
         stock (str): The stock symbol for which to train the model
 
-      Returns: 
+      Returns:
         Sequential: The trained nn
       """
       time_teps = 10
@@ -115,14 +116,14 @@ class CNNAgent(TradingAgent):
       return model
 
       def generate_signal_strategy(self,stock):
-        """  
-        Generates trading signals for the specified stock using trained CNN model. 
-        A signal is generated for each time period based on the predicted direction of the stock price. 
+        """
+        Generates trading signals for the specified stock using trained CNN model.
+        A signal is generated for each time period based on the predicted direction of the stock price.
 
-        Args: 
+        Args:
           stock (str): The stock symbol for which to generate signals
 
-        The method updates the signal_data attribute with signals for the given stock. 
+        The method updates the signal_data attribute with signals for the given stock.
 
         """
 
@@ -138,16 +139,16 @@ class CNNAgent(TradingAgent):
         signals['Position']= signals['Prediction'].apply(lambda x: 1 if x == 1 else 0)
 
         # Calculate Signal as change in position
-        signals['Signal'] =0 
+        signals['Signal'] =0
         signals.loc[signals['Position'] > signals['Position'].shift(1),'Signal'] = 1
         signals.loc[signals['Position'] < signals['Position'].shift(1),'Signal'] = -1
-        
+
         signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
 
         self.signal_data[stock] = signals
 
-        
-                
-      
 
-      
+
+
+
+
