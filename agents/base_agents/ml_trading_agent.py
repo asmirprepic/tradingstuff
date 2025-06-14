@@ -6,26 +6,26 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score,precision_score, recall_score, f1_score
 from agents.base_agents.trading_agent import TradingAgent
 
-class MLBasedAgent(TradingAgent): 
+class MLBasedAgent(TradingAgent):
   """
   Abstract base class for machine-learning based trading algorithms.
 
-  This class provides the shared functionality for ML-based trading strategies, including
-  feature creation, train-test splitting, and signal generation. Subclasses should implement
-  the `train_model` method to define the specific machine learning model used
+  Inherits from TradingAgent and provides machine learning training, signal generation,
+  and evaluation functionality. Subclasses must define the model, features, and
+  optionally override feature_engineering() and generate_signal_strategy().
 
-  Attributes: 
-  ---------------
-  model (object): The machine learning model to be used for trading
-  features (list): A list of feature column names used for model training.
-
+  Attributes:
+  model (object): The ML model (must implement fit/predict API).
+  features (list[str]): Names of feature columns used for training.
+  trained (bool): Flag indicating whether the model has been trained.
   """
+
 
   def __init__(self,data, model = None,features = None):
     """
     Initialize the MLTradingAgent with provided data and model
 
-    Args: 
+    Args:
     -------------
     data (pd.DataFrame): The dataset containing the stock prices or relevant trading data. Should be multilevel index with level 1 the stock symbol and level 2 data
     model (object): The machine learning model to use for predicitions
@@ -34,21 +34,52 @@ class MLBasedAgent(TradingAgent):
 
     super().__init__(data)
     self.algorithm_name = 'MLBaseAlgorithm'
+    self.model = model
     self.features = features
     self.trained = False
 
+  def default_feature_engineering(self,stock):
+    """
+    Default feature set: Open - Close and High - Low differences.
+    Target: +1 if next close > current, else -1
+
+    Returns:
+      X (pd.DataFrame): Engineered features.
+      Y (pd.Series): Binary target for classification
+    """
+
+    df = self.data[stock]
+    df['Open-Close'] = df['Open'] - df['Close']
+    df['High-Low'] = df['High'] - df['Low']
+    df = df.fill()
+
+    X = df[self.features].copy()
+    Y = np.where(df['Close'].shift(-1) > df['Close'],1,-1)
+    Y = pd.Series(Y, index = df.index)
+
+    return X,Y
+
+  @abstractmethod
+  def feature_engineering(self,stock):
+    """
+    Abstract method for custom feature engineering.
+    Returns (X,Y) with X features and Y target.
+    """
+    pass
+
+
   def create_classification_trading_condition(self,stock):
     """
-    Creates the feature set for classification model. 
+    Creates the feature set for classification model.
 
     Args:
     -----------
-      stock (str): The stock symbol for which to create features. 
+      stock (str): The stock symbol for which to create features.
 
     Returns:
     ----------
       pd.DataFrame: The features set
-      pd.Series: The target variable where 1 indicates an upward price movement and -1 indicates a downward price movement. 
+      pd.Series: The target variable where 1 indicates an upward price movement and -1 indicates a downward price movement.
     """
 
     data_copy = self.data[stock].copy()
@@ -65,9 +96,9 @@ class MLBasedAgent(TradingAgent):
 
   def create_train_split_group(self,X,Y,split_ratio):
     """
-    Splits the dataset into training and testing sets. 
+    Splits the dataset into training and testing sets.
 
-    Args: 
+    Args:
     -------------
       X (pd.DataFrame): The feature set
       Y (pd.DataFrame): The target variable
@@ -76,69 +107,40 @@ class MLBasedAgent(TradingAgent):
     """
 
     return train_test_split(X,Y,shuffle = False, test_size = 1-split_ratio)
-    
-  def default_feature_engineering(self,stock):
-    """
-    Standard feature engineering that calculates common trading features. 
 
-    Args:
-    -----------------
-    stock (str): The stock symbol for which stock to generate the symbol. 
 
-    Returns:
-    ----------------
-    tuple: A tuple containing: 
-      - pd.DataFrame: A dataframe containing engineered values
-      - pd.Series: A series containing the target variable for training
 
-    """
-
-    data_copy = self.data[stock].copy()
-    data_copy['Open-Close'] = self.data[stock]['Open'] - self.data[stock]['Close']
-    data_copy['High-Low'] = self.data[stock]['High'] - self.data[stock]['Low']
-    
-    # Assuming that the last observation will hold without any fluctuations.
-    data_copy.ffill(inplace = True)
-
-    X = data_copy[self.features]
-    # Target variable based on next periods price movement. Used for classification
-    Y = np.where(self.data[stock]['Close'].shift(-1) > self.data[stock]['Close'],1,-1)
-    Y_series = pd.Series(Y,index = self.data[stock].index)
-    Y = Y_series.loc[X.index]
-
-    return X,Y
-    
   @abstractmethod
   def feature_engineering(self,stock):
     """
-    Abstract method for feature engineering. 
+    Abstract method for feature engineering.
 
     This method should be implemented by subclasses to define the specific features to be used
-    by the model. 
+    by the model.
 
-    Args: 
+    Args:
     -----------
-    stock (str): The stock symbol for which to train the model 
-    test_size (float): The proportion of data to use as a test set 
+    stock (str): The stock symbol for which to train the model
+    test_size (float): The proportion of data to use as a test set
 
-    Returns: 
+    Returns:
     ------------
-    tuple: A tuple containng: 
+    tuple: A tuple containng:
       - pd.DataFrame: A dataframe of engineering features
-      - pd.Series: A Series containing the target variable for training. 
+      - pd.Series: A Series containing the target variable for training.
     """
 
     return self.default_feature_engineering(stock)
-    
+
 
   def train_model(self,stock,test_size = 0.2):
     """
-    Trains the model on the specific stocks data. 
+    Trains the model on the specific stocks data.
 
-    Args: 
+    Args:
     -----------------
     stock (str): The stock symbol for which to train the model.
-    test_size (float): The proportion of data to use as a test set. 
+    test_size (float): The proportion of data to use as a test set.
 
     Returns:
     -----------------
@@ -146,7 +148,7 @@ class MLBasedAgent(TradingAgent):
     """
 
 
-    if not self.model or not self.features: 
+    if not self.model or not self.features:
       raise ValueError("Model and features must be defined to train the model")
 
     X,y = self.feature_engineering(stock)
@@ -168,35 +170,35 @@ class MLBasedAgent(TradingAgent):
     return metrics
 
 
-  
+
   @abstractmethod
   def generate_signal_strategy(self,stock,*args):
     """
-    Abstract method to generate trading signals for a given stock using the ML model. 
+    Abstract method to generate trading signals for a given stock using the ML model.
 
-    This method should be implemented by subclasses to define the specific strategy for generating sigals using 
-    the trained ML model. 
+    This method should be implemented by subclasses to define the specific strategy for generating sigals using
+    the trained ML model.
 
-    Args: 
+    Args:
     ----------
-    stock (str): The stock symbol for which to generate the signals. 
+    stock (str): The stock symbol for which to generate the signals.
     """
   pass
 
   def predict_signals(self,stock):
     """
-    Use the trained ML to predict trading signals. 
+    Use the trained ML to predict trading signals.
 
     Args:
     -----------
-    stock (str): The stock symbol for which to predict signals. 
+    stock (str): The stock symbol for which to predict signals.
 
     Returns:
     ----------
     pd.DataFrame: A dataframe containing the predicted signals
 
     """
-    if not self.trained: 
+    if not self.trained:
       raise ValueError("Model needs to be trained before predicting signals")
 
     X,_ = self.feature_engineering(stock)
@@ -213,8 +215,8 @@ class MLBasedAgent(TradingAgent):
     signals['return'] = np.log(self.data[(stock,'Close')].loc[X.index] / self.data[(stock,'Close')].shift(1).loc[X.index])
 
     return signals
-    
-    
-  
-    
-    
+
+
+
+
+
