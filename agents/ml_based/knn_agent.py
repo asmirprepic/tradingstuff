@@ -1,47 +1,36 @@
 from agents.base_agents.ml_trading_agent import MLBasedAgent
-import numpy as np
-import pandas as pd
 from sklearn.neighbors import KNeighborsClassifier
 
 class KNNAgent(MLBasedAgent):
     """
-    A trading agent using K-Nearest Neighbors (KNN) to generate trading signals.
+    A trading agent using the K-Nearest Neighbors (KNN) classifier to generate trading signals.
     """
 
     def __init__(self, data, n_neighbors=15):
         model = KNeighborsClassifier(n_neighbors=n_neighbors)
         features = ['Open-Close', 'High-Low']
         super().__init__(data, model=model, features=features)
-        self.algorithm_name = 'KNN'
+        self.algorithm_name = "KNN"
+        self.models = {}
 
     def feature_engineering(self, stock):
-        """
-        Feature engineering using 'Open-Close' and 'High-Low' features.
-        """
         return self.default_feature_engineering(stock)
 
     def generate_signal_strategy(self, stock, mode='backtest'):
-        """
-        Trains model (if needed) and generates signals for a single stock.
-        """
-        print(f"[{stock}] Running generate_signal_strategy in {mode} mode.")
+        print(f"[{stock}] Generating signals in {mode} mode using KNN...")
 
-        self.train_model(stock)
+        # Train model if needed
+        if stock not in self.models:
+            X, Y = self.feature_engineering(stock)
+            X_train, X_test, Y_train, Y_test = self.create_train_split_group(X, Y, split_ratio=0.8)
+            model = KNeighborsClassifier(n_neighbors=self.model.n_neighbors)
+            model.fit(X_train, Y_train)
+            self.models[stock] = model
+        else:
+            model = self.models[stock]
+
+        self.model = model  # Use this model in base class
+        self.trained = True  # Allow predict_signals to proceed
 
         signals = self.predict_signals(stock)
         self.signal_data[stock] = signals
-
-    def generate_signals(self, stocks=None):
-        """
-        Generates signals for a list of stocks or all if not specified.
-        """
-        if stocks is None:
-            stocks = self.stocks_in_data
-        elif isinstance(stocks, str):
-            stocks = [stocks]
-
-        for stock in stocks:
-            if stock not in self.stocks_in_data:
-                print(f"[Warning] Stock {stock} not found in data. Skipping.")
-                continue
-            self.generate_signal_strategy(stock)
