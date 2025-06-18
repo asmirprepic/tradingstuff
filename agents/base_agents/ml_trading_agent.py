@@ -12,9 +12,9 @@ class MLBasedAgent(TradingAgent, ABC):
         self.model = model
         self.features = features
         self.algorithm_name = 'MLBaseAlgorithm'
-        self.models = {}  # Per-stock models
-        self.train_data = {}  # Per-stock train/test splits
-        self.signal_data = {}  # Per-stock signals
+        self.models = {}
+        self.train_data = {}
+        self.signal_data = {}
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
     def default_feature_engineering(self, stock):
@@ -75,7 +75,7 @@ class MLBasedAgent(TradingAgent, ABC):
         if mode == 'backtest':
             if stock not in self.train_data:
                 raise ValueError(f"Training data for {stock} is missing.")
-            X_pred = self.train_data[stock][1]  # X_test
+            X_pred = self.train_data[stock][1]
             index_used = X_pred.index
         elif mode == 'live':
             X_pred = X
