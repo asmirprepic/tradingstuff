@@ -99,3 +99,12 @@ class MLBasedAgent(TradingAgent, ABC):
         close = self.data[(stock, 'Close')]
         signals['return'] = np.log(close / close.shift(1)).reindex(index_used)
         return signals
+
+    def run_all(self, mode='backtest'):
+        """
+        Train and generate signals for all stocks in data.
+        """
+        for stock in self.stocks_in_data:
+            self.train_model(stock)
+            self.signal_data[stock] = self.predict_signals(stock, mode=mode)
+        self.calculate_returns()
