@@ -1,154 +1,73 @@
-from agents.base_agents.trading_agent import TradingAgent
-import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Conv1D,MaxPooling1D,Flatten,Dense
-from sklearn.preprocessing import MinMaxScaler
-import numpy as np
+from tensorflow.keras.layers import Conv1D, Flatten, Dense
+from tensorflow.keras.callbacks import EarlyStopping
+from agents.base_agents.nn_based_agent import NNBasedAgent
 import pandas as pd
-
-class CNNAgent(TradingAgent):
-  """
-  A trading agent that uses convolutional neural network to generate trading signals.
-  This agent employs a neural network model based on price movement features to predict
-  the direction of the stock price movement.
-
-  Attributes:
-    algorithm_name(string): Name of the algorithm implementet, set to "CNN"
-    stocks_in_data (pd.Index): Unique stock symbols present in the data
-    signal_data (dict): A dictionary to store signal data for each stock
-  """
-
-  def __init__(self,data):
-    super.__init__(data)
-    self.algorithm_name = 'CNN'
-    self.stocks_in_data = self.data.columns.get_level_values(0).unique()
-
-    for stock in self.stocks_in_data:
-      self.generate_signal_strategy(stock)
-
-    self.calculate_returns()
-
-  def create_classification_trading_condition(self,stock):
-    """
-    Creates a feature set for the CNN model. The features include
-    'Open-Close' and 'High-low'
-
-    Args:
-      stock(str): The stock symbol for which to create features.
-
-    Returns:
-      pd.DataFrame: the feature set
-      pd.Series: The target variable, where 1 indicates an upward price movement and -1 indicates a downward price movement
-    """
-
-    data_copy = self.data[stock].copy()
-    data_copy['Open-Close'] = self.data[stock]['Open'] - self.data[stock]['Close']
-    data_copy['High-low'] = self.data[stock]['High'] - self.data[stock]['Low']
-    data_copy.dropna(inplace = True)
-
-    X = data_copy[['Open-Close','High-Low']].values
-    Y = np.where(self.data[stock]['Close'].shift(-1) > self.data[stock]['Close'],1,-1)
-    Y_series = pd.Series(Y, index = self.data[stock].index]
-    Y = Y_series.loc[data_copy.index].values
-
-    return X,Y
-
-    def create_train_split_group(self,X,Y,split_ratio):
-      """
-      Splits the dataset into test and train set
-
-      Args:
-        X (np.ndarray): The feature set
-        Y (np.ndarray): The target variable
-        split_ratio (float): The proportion of the dataset to in include in the train test split.
-      """
-      split_index = int(len(X)*split_ratio)
-      X_train,X_test = X[:split_index], X[split_index:]
-      Y_train,Y_test = Y[:split_index],Y[split_index:]
-
-      return X_train,X_test,Y_train,Y_test
-
-    def prepare_cnn_data(self,X,time_steps):
-      """
-      Prepares the data for CNN input by creating sequences of the specified time steps.
-
-      Args:
-        X (np.ndarray): The feature set.
-        time_steps (int): The number of time steps to include in each sequence.
-
-      Returns:
-        np.ndarray: The reshaped feature set suitable for CNN input.
-      """
-      cnn_data =[]
-      for i in range(time_steps,len(X)):
-        cnn_data.append(X[i-time_steps:i])
-      return np.array(cnn_data)
-
-    def CNN_model(self,stock):
-      """
-      Trains the CNN model for the specified stock.
-
-      Args:
-        stock (str): The stock symbol for which to train the model
-
-      Returns:
-        Sequential: The trained nn
-      """
-      time_teps = 10
-      X, Y = self.create_classification_trading_condition(stock)
-      X_train,X_test, Y_train,Y_test = self.create_train_test_split_group(X,Y,split_ratio= 0.8)
-
-      X_train = self.prepare_cnn_data(X_train,time_steps)
-      X_test = self.prepare_cnn_data(X_test,time_steps)
-      Y_train = Y[time_steps:len(X_train) + time_steps]
-      Y_test = Y[len(X_train) + time_stemps:]
-
-      model = Sequential()
-      model.add(Conv1D(filters = 64, kernel_size = 3, activation = 'relu', input_shape=(X_train.shape[1], X_train.shape[2])))
-      model.add(MaxPooling1D(pool_size = 2))
-      model.add(Flatten())
-      model.add(Dense(50,activation = 'relu'))
-      model.add(Dense(1,activation = 'sigmoid'))
-
-      model.compile(optimizer = 'adam', loss = 'binary_crossentropy', metrics = ['accuracy'])
-      model.fit(X_train,Y_train,epochs = 20, batch_size = 32, verbose = 0)
-
-      return model
-
-      def generate_signal_strategy(self,stock):
-        """
-        Generates trading signals for the specified stock using trained CNN model.
-        A signal is generated for each time period based on the predicted direction of the stock price.
-
-        Args:
-          stock (str): The stock symbol for which to generate signals
-
-        The method updates the signal_data attribute with signals for the given stock.
-
-        """
-
-        signals = pd.DataFrame(index = self.data.index)
-        time_steps = 10
-        X,_ = self.create_classifcation_trading_condition(stock)
-        X = self.prepare_cnn_data(X,time_steps)
-        cnn_model = self.CNN_model(stock)
-        prediction = (self.cnn_model.predict(X) > 0.5).as_type(int).flatten()
-
-        signals= signals.loc[self.data.index[time_steps:len(prediction) + time_steps]]
-        signals['Prediction'] = prediction
-        signals['Position']= signals['Prediction'].apply(lambda x: 1 if x == 1 else 0)
-
-        # Calculate Signal as change in position
-        signals['Signal'] =0
-        signals.loc[signals['Position'] > signals['Position'].shift(1),'Signal'] = 1
-        signals.loc[signals['Position'] < signals['Position'].shift(1),'Signal'] = -1
-
-        signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
-
-        self.signal_data[stock] = signals
+import numpy as np
 
 
+class CNNAgent(NNBasedAgent):
+    def __init__(self, data):
+        super().__init__(data, epochs=25)
+        self.algorithm_name = "CNN"
 
+    def feature_engineering(self, stock):
+        df = self.data[stock].copy()
+        df['Return'] = np.log(df['Close'] / df['Close'].shift(1))
+        df['Volatility'] = df['Return'].rolling(window=5).std()
+        df = df.dropna()
 
+        X = df[['Return', 'Volatility']]
+        y = (df['Close'].shift(-1) > df['Close']).astype(int)
+        X = X.dropna()
+        y = y.loc[X.index]
+        return X, y, ['Return', 'Volatility']
 
+    def build_model(self, input_shape):
+        model = Sequential([
+            Conv1D(16, kernel_size=2, activation='relu', input_shape=(input_shape[0], 1)),
+            Flatten(),
+            Dense(1, activation='sigmoid')
+        ])
+        model.compile(optimizer='adam', loss='binary_crossentropy')
+        return model
 
+    def train_model(self, stock):
+        X, y, feature_cols = self.feature_engineering(stock)
+        X = X[feature_cols].values.reshape((X.shape[0], len(feature_cols), 1))
+        X_train, X_test, y_train, y_test = self.create_train_split_group(X, y, shuffle=False, test_size=1 - self.split_ratio)
+
+        model = self.build_model(input_shape=(len(feature_cols), 1))
+        es = EarlyStopping(monitor="val_loss", patience=3, restore_best_weights=True)
+        model.fit(X_train, y_train,
+                  validation_data=(X_test, y_test),
+                  epochs=self.epochs,
+                  batch_size=self.batch_size,
+                  verbose=self.verbose,
+                  callbacks=[es])
+        self.models[stock] = model
+        self.train_data[stock] = (X_train, X_test, y_train, y_test)
+
+    def predict_signals(self, stock, mode='backtest', threshold=0.5):
+        model = self.models[stock]
+        X_train, X_test, _, _ = self.train_data[stock]
+
+        if mode == 'backtest':
+            X_pred = X_test
+        else:
+            raise NotImplementedError("Live mode not implemented for CNN")
+
+        probs = model.predict(X_pred, verbose=0).flatten()
+        predictions = (probs > threshold).astype(int)
+
+        index_used = pd.date_range(end=self.data[stock].index[-1], periods=len(predictions))
+        signals = pd.DataFrame(index=index_used)
+        signals['Prediction'] = predictions
+        signals['Position'] = predictions
+        signals['Signal'] = 0
+        signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
+        signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
+
+        close = self.data[(stock, 'Close')].reindex(index_used)
+        signals['return'] = np.log(close / close.shift(1))
+        return signals
