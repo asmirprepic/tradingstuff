@@ -114,6 +114,59 @@ class SequentialNNAgent(TradingAgent, ABC):
         signals['return'] = np.log(close / close.shift(1))
         return signals
 
+    def walk_forward_predict(self, stock, initial_train_size=100, step_size=1):
+        X, y = self.feature_engineering(stock)
+        predictions = []
+        indices = []
+
+        for start in range(initial_train_size, len(X) - step_size + 1, step_size):
+            X_train = X[:start]
+            y_train = y[:start]
+            X_test = X[start:start+step_size]
+
+            # Normalize based on train
+            mu = X_train.mean(axis=0)
+            sigma = X_train.std(axis=0) + 1e-8
+            X_train_norm = (X_train - mu) / sigma
+            X_test_norm = (X_test - mu) / sigma
+
+            model = self.build_model(input_shape=X_train.shape[1:])
+            model.fit(
+                X_train_norm, y_train,
+                epochs=self.epochs,
+                batch_size=self.batch_size,
+                verbose=self.verbose,
+                callbacks=[EarlyStopping(monitor="loss", patience=3, restore_best_weights=True)]
+            )
+
+            prob = model.predict(X_test_norm, verbose=0).flatten()
+            pred = (prob > 0.5).astype(int)
+
+            predictions.extend(pred)
+            indices.extend(self.data[stock].index[start:start+step_size])
+
+        # Assemble final signal DataFrame
+        signals = pd.DataFrame(index=indices)
+        signals['Prediction'] = predictions
+        signals['Position'] = predictions
+        signals['Signal'] = 0
+        signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
+        signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
+
+        close = self.data[(stock, 'Close')].reindex(signals.index)
+        signals['return'] = np.log(close / close.shift(1))
+
+        return signals
+
+    def run_all_walk_forward(self, initial_train_size=100, step_size=1):
+        for stock in self.stocks_in_data:
+            try:
+                print(f"[WALK-FORWARD] {stock}")
+                self.signal_data[stock] = self.walk_forward_predict(stock, initial_train_size, step_size)
+            except Exception as e:
+                print(f"[WARNING] {stock} failed: {e}")
+        self.calculate_returns()
+
     def run_all(self, mode='backtest'):
         """
         Trains and generates signals for all stocks in data.
