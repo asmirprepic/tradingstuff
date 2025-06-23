@@ -100,6 +100,54 @@ class MLBasedAgent(TradingAgent, ABC):
         signals['return'] = np.log(close / close.shift(1)).reindex(index_used)
         return signals
 
+    def walk_forward_predict(self, stock, initial_train_size=100, step_size=1):
+        """
+        Perform walk-forward retraining and prediction for one stock.
+
+        Args:
+            stock (str): Stock symbol
+            initial_train_size (int): Minimum number of days to start training
+            step_size (int): How many days to move forward each iteration
+
+        Returns:
+            pd.DataFrame: Signals with predicted positions across full history
+        """
+        X, Y = self.feature_engineering(stock)
+        predictions = []
+        indices = []
+
+        for start in range(initial_train_size, len(X) - step_size + 1, step_size):
+            X_train = X.iloc[:start]
+            Y_train = Y.iloc[:start]
+            X_test = X.iloc[start:start + step_size]
+
+            model = clone(self.model)
+            model.fit(X_train, Y_train)
+
+            if hasattr(model, "predict_proba"):
+                prob = model.predict_proba(X_test)[:, 1]
+                pred = np.where(prob > 0.5, 1, -1)
+            else:
+                pred = model.predict(X_test)
+
+            predictions.extend(pred)
+            indices.extend(X_test.index)
+
+
+        signals = pd.DataFrame(index=indices)
+        signals['Prediction'] = predictions
+        signals['Position'] = (signals['Prediction'] == 1).astype(int)
+        signals['Signal'] = 0
+        signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
+        signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
+
+
+        close = self.data[(stock, 'Close')].reindex(signals.index)
+        signals['return'] = np.log(close / close.shift(1))
+
+        return signals
+
+
     def run_all(self, mode='backtest'):
         """
         Train and generate signals for all stocks in data.
@@ -107,4 +155,22 @@ class MLBasedAgent(TradingAgent, ABC):
         for stock in self.stocks_in_data:
             self.train_model(stock)
             self.signal_data[stock] = self.predict_signals(stock, mode=mode)
+        self.calculate_returns()
+
+    def run_all_walk_forward(self, initial_train_size=100, step_size=1):
+        """
+        Apply walk-forward retraining and prediction for all stocks.
+
+        Args:
+            initial_train_size (int): Number of observations to start training
+            step_size (int): How many steps to move forward each iteration
+        """
+        for stock in self.stocks_in_data:
+            try:
+                print(f"[WALK-FORWARD] {stock}")
+                signals = self.walk_forward_predict(stock, initial_train_size, step_size)
+                self.signal_data[stock] = signals
+            except Exception as e:
+                print(f"[WARNING] Walk-forward failed for {stock}: {e}")
+
         self.calculate_returns()

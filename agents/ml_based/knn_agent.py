@@ -7,30 +7,37 @@ class KNNAgent(MLBasedAgent):
     """
 
     def __init__(self, data, n_neighbors=15):
+        """
+        Initializes the KNN-based agent.
+
+        Args:
+            data (pd.DataFrame): MultiIndex DataFrame with OHLCV data.
+            n_neighbors (int): Number of neighbors to use in KNN.
+        """
         model = KNeighborsClassifier(n_neighbors=n_neighbors)
         features = ['Open-Close', 'High-Low']
         super().__init__(data, model=model, features=features)
         self.algorithm_name = "KNN"
-        self.models = {}
 
     def feature_engineering(self, stock):
+        """
+        Uses the default feature engineering: Open-Close and High-Low.
+        """
         return self.default_feature_engineering(stock)
 
     def generate_signal_strategy(self, stock, mode='backtest'):
-        print(f"[{stock}] Generating signals in {mode} mode using KNN...")
+        """
+        Train (if needed) and generate signals for a specific stock using KNN.
 
-        # Train model if needed
+        Args:
+            stock (str): The stock symbol to generate signals for.
+            mode (str): 'backtest' or 'live' mode.
+        """
+        print(f"[{stock}] Generating signals in {mode} mode using {self.algorithm_name}...")
+
+
         if stock not in self.models:
-            X, Y = self.feature_engineering(stock)
-            X_train, X_test, Y_train, Y_test = self.create_train_split_group(X, Y, split_ratio=0.8)
-            model = KNeighborsClassifier(n_neighbors=self.model.n_neighbors)
-            model.fit(X_train, Y_train)
-            self.models[stock] = model
-        else:
-            model = self.models[stock]
+            self.train_model(stock)
 
-        self.model = model  # Use this model in base class
-        self.trained = True  # Allow predict_signals to proceed
 
-        signals = self.predict_signals(stock)
-        self.signal_data[stock] = signals
+        self.signal_data[stock] = self.predict_signals(stock, mode=mode)
