@@ -109,3 +109,55 @@ class NNBasedAgent(TradingAgent, ABC):
     @abstractmethod
     def generate_signal_strategy(self, stock, *args, **kwargs):
         pass
+
+
+    def walk_forward_predict(self,stock,initial_train_size = 100,step_size = 1, threshold = 0.5):
+        X,y,feature_cols = self.feature_engineering(stock)
+        X = X[feature_cols]
+
+        predictions = []
+        indicies = []
+
+        for start in range(initial_train_size,len(X) - step_size + 1, step_size):
+            X_train = X.iloc[:start]
+            y_train = y.iloc[:start]
+            X_test = X.iloc[start:start + step_size]
+
+            mu,sigma = X_train.mean(), X_train.std() + 1e-8
+            X_train_norm = (X_train - mu) / sigma
+            X_test_norm = (X_test - mu) / sigma
+
+            model = self.build_model(input_shape=(len(feature_cols),))
+            model.fit(
+                X_train_norm, y_train,
+                epochs = self.epochs,
+                batch_size = self.batch_size,
+                verbose = self.verbose,
+                callbacks = [EarlyStopping(monitor = 'loss',patience = 3,restore_best_weights = True)]
+
+            )
+
+            prob = model.predict(X_test_norm, verbose = 0).flatten()
+            pred = (prob > threshold).astype(int)
+            predictions.extend(pred)
+            indicies.extend(X_test.index)
+
+        signals = pd.DataFrame(index = indicies)
+        signals['Prediction'] = predictions
+        signals['Position'] = predictions
+        signals['Signal'] = 0
+        signals.loc[signals['Position'] > signals['Position'].shift(1),'Signal'] = 1
+        signals.loc[signals['Position'] < signals['Position'].shift(1),'Signal'] = -1
+
+        close = self.data[(stock,'Close')].reindex(signals.index)
+        signals['return'] = np.log(close/close.shift(1))
+
+        return signals
+
+    def run_all_walk_forward(self,intial_train_size = 100,step_size = 1):
+        for stock in self.stocks_in_data:
+            try:
+                print(f"[WALK FORWARD] {stock}")
+                self.signal_data[stock] = self.walk_forward_predict(stock,intial_train_size,step_size)
+            except Exception as e:
+                print(f"[WARNING] {stock} failed: {e}")
