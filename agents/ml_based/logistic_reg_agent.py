@@ -9,7 +9,7 @@ class LRAgent(MLBasedAgent):
 
     def __init__(self, data):
         model = LogisticRegression(max_iter=1000)
-        features = ['Open-Close', 'High-Low']
+        features = ['OC', 'HL', 'Return_1D', 'Return_5D', 'MA_5', 'MA_10', 'Momentum', 'Volatility_5D', 'Volume_Change']
         super().__init__(data, model=model, features=features)
         self.algorithm_name = 'Logistic_Regression'
 

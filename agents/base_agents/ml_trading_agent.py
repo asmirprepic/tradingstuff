@@ -19,14 +19,35 @@ class MLBasedAgent(TradingAgent, ABC):
 
     def default_feature_engineering(self, stock):
         df = self.data[stock].copy()
-        df['Open-Close'] = df['Open'] - df['Close']
-        df['High-Low'] = df['High'] - df['Low']
+
+        # Basic price-derived features
+        df['OC'] = df['Open'] - df['Close']
+        df['HL'] = df['High'] - df['Low']
+        df['Return_1D'] = df['Close'].pct_change()
+        df['Return_5D'] = df['Close'].pct_change(5)
+
+        # Moving averages and momentum
+        df['MA_5'] = df['Close'].rolling(window=5).mean()
+        df['MA_10'] = df['Close'].rolling(window=10).mean()
+        df['Momentum'] = df['Close'] - df['MA_5']
+
+        # Volatility and volume changes
+        df['Volatility_5D'] = df['Return_1D'].rolling(5).std()
+        df['Volume_Change'] = df['Volume'].pct_change()
         df = df.ffill()
 
         X = df[self.features].copy()
+        X.replace([np.inf, -np.inf], np.nan, inplace=True)
+        X.dropna(inplace=True)
+
+
         Y = np.where(df['Close'].shift(-1) > df['Close'], 1, -1)
         Y = pd.Series(Y, index=df.index)
+        Y = Y.loc[X.index]
+
         return X, Y
+
+
 
     @abstractmethod
     def feature_engineering(self, stock):
@@ -124,6 +145,8 @@ class MLBasedAgent(TradingAgent, ABC):
             model = clone(self.model)
             model.fit(X_train, Y_train)
 
+
+
             if hasattr(model, "predict_proba"):
                 prob = model.predict_proba(X_test)[:, 1]
                 pred = np.where(prob > 0.5, 1, -1)
@@ -165,6 +188,8 @@ class MLBasedAgent(TradingAgent, ABC):
             initial_train_size (int): Number of observations to start training
             step_size (int): How many steps to move forward each iteration
         """
+        self.signal_data = {}
+
         for stock in self.stocks_in_data:
             try:
                 print(f"[WALK-FORWARD] {stock}")
