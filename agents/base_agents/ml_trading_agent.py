@@ -5,19 +5,24 @@ from sklearn.base import clone
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from agents.base_agents.trading_agent import TradingAgent
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 class MLBasedAgent(TradingAgent, ABC):
     def __init__(self, data, model=None, features=None):
         super().__init__(data)
-        self.model = model
+        self._base_model = model
         self.features = features
         self.algorithm_name = 'MLBaseAlgorithm'
         self.models = {}
         self.train_data = {}
         self.signal_data = {}
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
+        self.feature_cache = {}
 
-    def default_feature_engineering(self, stock):
+    def default_feature_engineering(self, stock,force_refresh = False):
+        if stock in self.feature_cache and not force_refresh:
+            return self.feature_cache[stock]
         df = self.data[stock].copy()
 
         # Basic price-derived features
@@ -45,6 +50,8 @@ class MLBasedAgent(TradingAgent, ABC):
         Y = pd.Series(Y, index=df.index)
         Y = Y.loc[X.index]
 
+        self.feature_cache[stock] = (X,Y)
+
         return X, Y
 
 
@@ -67,7 +74,7 @@ class MLBasedAgent(TradingAgent, ABC):
         X, Y = self.feature_engineering(stock)
         X_train, X_test, Y_train, Y_test = self.create_train_split_group(X, Y, split_ratio)
 
-        model = clone(self.model)
+        model = clone(self._base_model)
         model.fit(X_train, Y_train)
         self.models[stock] = model
         self.train_data[stock] = (X_train, X_test, Y_train, Y_test)
@@ -142,7 +149,7 @@ class MLBasedAgent(TradingAgent, ABC):
             Y_train = Y.iloc[:start]
             X_test = X.iloc[start:start + step_size]
 
-            model = clone(self.model)
+            model = clone(self._base_model)
             model.fit(X_train, Y_train)
 
 
@@ -170,6 +177,18 @@ class MLBasedAgent(TradingAgent, ABC):
 
         return signals
 
+    def _process_stock(self,stock,mode = 'backtest',walk_forward = True,**kwargs):
+        try:
+            if walk_forward:
+                print(f"[WALK-FORWARD] {stock}")
+                signals = self.walk_forward_predict(stock,**kwargs)
+            else:
+                self.train_model(stock)
+                signals = self.predict_signals(stock,mode = mode)
+            return stock,signals
+        except Exception as e:
+            print(f"[ERROR] {stock}: {e}")
+            return stock,None
 
     def run_all(self, mode='backtest'):
         """
@@ -180,7 +199,7 @@ class MLBasedAgent(TradingAgent, ABC):
             self.signal_data[stock] = self.predict_signals(stock, mode=mode)
         self.calculate_returns()
 
-    def run_all_walk_forward(self, initial_train_size=100, step_size=1):
+    def run_all_walk_forward(self, initial_train_size=100, step_size=1,max_workers = 10):
         """
         Apply walk-forward retraining and prediction for all stocks.
 
@@ -190,12 +209,27 @@ class MLBasedAgent(TradingAgent, ABC):
         """
         self.signal_data = {}
 
-        for stock in self.stocks_in_data:
-            try:
-                print(f"[WALK-FORWARD] {stock}")
-                signals = self.walk_forward_predict(stock, initial_train_size, step_size)
-                self.signal_data[stock] = signals
-            except Exception as e:
-                print(f"[WARNING] Walk-forward failed for {stock}: {e}")
+        with ThreadPoolExecutor(max_workers = max_workers) as executor:
+            futures = {
+                executor.submit(self._process_stock,stock,walk_forward =True,
+                                initial_train_size = initial_train_size,
+                                step_size = step_size): stock
+                for stock in self.stocks_in_data
+            }
 
+            for future in as_completed(futures):
+                stock,signals = future.result()
+                if signals is not None:
+                    self.signal_data[stock] = signals
         self.calculate_returns()
+
+        # for stock in self.stocks_in_data:
+        #     try:
+        #         print(f"[WALK-FORWARD] {stock}")
+        #         signals = self.walk_forward_predict(stock, initial_train_size, step_size)
+        #         self.signal_data[stock] = signals
+        #     except Exception as e:
+        #         print(f"[WARNING] Walk-forward failed for {stock}: {e}")
+
+        # self.calculate_returns()
+

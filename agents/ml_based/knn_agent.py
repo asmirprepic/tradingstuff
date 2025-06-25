@@ -15,7 +15,8 @@ class KNNAgent(MLBasedAgent):
             n_neighbors (int): Number of neighbors to use in KNN.
         """
         model = KNeighborsClassifier(n_neighbors=n_neighbors)
-        features = ['OC', 'HL', 'Return_1D', 'Return_5D', 'MA_5', 'MA_10', 'Momentum', 'Volatility_5D', 'Volume_Change']
+        features  = ['Return_1D','OC','HL']
+        #= ['OC', 'HL', 'Return_1D', 'Return_5D', 'MA_5', 'MA_10', 'Momentum', 'Volatility_5D', 'Volume_Change']
         super().__init__(data, model=model, features=features)
         self.algorithm_name = "KNN"
 
