@@ -20,38 +20,32 @@ class MLBasedAgent(TradingAgent, ABC):
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
         self.feature_cache = {}
 
-    def default_feature_engineering(self, stock,force_refresh = False):
+    def default_feature_engineering(self, stock, force_refresh=False):
         if stock in self.feature_cache and not force_refresh:
             return self.feature_cache[stock]
-        df = self.data[stock].copy()
 
-        # Basic price-derived features
+        df = self.data[stock].copy()
+        required_cols = ['Open', 'Close', 'High', 'Low', 'Volume']
+        if not all(col in df.columns for col in required_cols):
+            raise ValueError(f"Missing required columns for {stock}")
+
         df['OC'] = df['Open'] - df['Close']
         df['HL'] = df['High'] - df['Low']
         df['Return_1D'] = df['Close'].pct_change()
         df['Return_5D'] = df['Close'].pct_change(5)
-
-        # Moving averages and momentum
         df['MA_5'] = df['Close'].rolling(window=5).mean()
         df['MA_10'] = df['Close'].rolling(window=10).mean()
         df['Momentum'] = df['Close'] - df['MA_5']
-
-        # Volatility and volume changes
         df['Volatility_5D'] = df['Return_1D'].rolling(5).std()
         df['Volume_Change'] = df['Volume'].pct_change()
         df = df.ffill()
 
+        df['Target'] = np.where(df['Close'].shift(-1) > df['Close'], 1, -1)
+        df = df.dropna(subset=self.features + ['Target'])
+
         X = df[self.features].copy()
-        X.replace([np.inf, -np.inf], np.nan, inplace=True)
-        X.dropna(inplace=True)
-
-
-        Y = np.where(df['Close'].shift(-1) > df['Close'], 1, -1)
-        Y = pd.Series(Y, index=df.index)
-        Y = Y.loc[X.index]
-
-        self.feature_cache[stock] = (X,Y)
-
+        Y = df['Target'].copy()
+        self.feature_cache[stock] = (X, Y)
         return X, Y
 
 
@@ -64,11 +58,23 @@ class MLBasedAgent(TradingAgent, ABC):
     def generate_signal_strategy(self, stock, *args, **kwargs):
         pass
 
+    def _build_signals(self, predictions, index, stock):
+        signals = pd.DataFrame(index=index)
+        signals['Prediction'] = predictions
+        signals['Position'] = (signals['Prediction'] == 1).astype(int)
+        signals['Signal'] = 0
+        signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
+        signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
+
+        close = self.data[(stock, 'Close')].reindex(index)
+        signals['return'] = np.log(close / close.shift(1))
+        return signals
+
     def create_train_split_group(self, X, Y, split_ratio):
         return train_test_split(X, Y, shuffle=False, test_size=1 - split_ratio)
 
     def train_model(self, stock, split_ratio=0.8):
-        if not self.model or not self.features:
+        if self._base_model is None or self.features is None:
             raise ValueError("Model and features must be defined.")
 
         X, Y = self.feature_engineering(stock)
@@ -223,6 +229,17 @@ class MLBasedAgent(TradingAgent, ABC):
                     self.signal_data[stock] = signals
         self.calculate_returns()
 
+    def _build_signals(self, predictions, index, stock):
+        signals = pd.DataFrame(index=index)
+        signals['Prediction'] = predictions
+        signals['Position'] = (signals['Prediction'] == 1).astype(int)
+        signals['Signal'] = 0
+        signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
+        signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
+
+        close = self.data[(stock, 'Close')].reindex(index)
+        signals['return'] = np.log(close / close.shift(1))
+        return signals
         # for stock in self.stocks_in_data:
         #     try:
         #         print(f"[WALK-FORWARD] {stock}")
