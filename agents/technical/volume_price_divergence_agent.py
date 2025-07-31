@@ -1,43 +1,64 @@
-import pandas as pd
 from agents.base_agents.trading_agent import TradingAgent
-
+import pandas as pd
+import numpy as np
 
 class VolumePriceDivergenceAgent(TradingAgent):
-    def __init__(self, window: int = 2, threshold: float = 0.0):
-        """
-        Volume-Price Divergence strategy.
-        - window: number of days over which to compute price and volume change.
-        - threshold: minimum absolute divergence to act.
-        """
-        super().__init__()
+    """
+    A trading agent that generates signals based on volume-price divergence.
+
+    Buys when price drops with decreasing volume (weak selling pressure).
+    Sells when price rises with decreasing volume (weak buying pressure).
+
+    Args:
+        data (pd.DataFrame): MultiIndex (stock, 'Close'/'Volume') price data.
+        window (int): Number of periods for computing change.
+        threshold (float): Minimum absolute price change to trigger a signal.
+    """
+
+    def __init__(self, data, window=2, threshold=0.005):
+        super().__init__(data)
+        self.algorithm_name = 'VolumePriceDivergence'
         self.window = window
         self.threshold = threshold
+        self.price_type = 'Close'
+        self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
-    def generate_signals(self, data: pd.DataFrame) -> pd.Series:
+        for stock in self.stocks_in_data:
+            self.generate_signal_strategy(stock)
+
+        self.calculate_returns()
+
+    def generate_signal_strategy(self, stock):
         """
-        Generate trading signals based on volume-price divergence.
-
-        Parameters:
-        - data: DataFrame with columns ['Close', 'Volume']
-
-        Returns:
-        - pd.Series with signals: 1 for buy, -1 for sell, 0 for hold
+        Generate trading signals for the specified stock based on volume-price divergence.
         """
-        df = data.copy()
+        signals = pd.DataFrame(index=self.data.index)
 
-        # Compute returns and volume change
-        df['price_return'] = df['Close'].pct_change(self.window)
-        df['volume_change'] = df['Volume'].pct_change(self.window)
+        price = self.data[(stock, 'Close')]
+        volume = self.data[(stock, 'Volume')]
 
-        # Signal: look for opposite signs (divergence)
-        df['signal'] = 0
+        price_change = price.pct_change(self.window)
+        volume_change = volume.pct_change(self.window)
 
-        # Buy: price down, volume down → possible oversold
-        buy_cond = (df['price_return'] < -self.threshold) & (df['volume_change'] < 0)
-        df.loc[buy_cond, 'signal'] = 1
+        signals['price_change'] = price_change
+        signals['volume_change'] = volume_change
 
-        # Sell: price up, volume down → possible weak breakout
-        sell_cond = (df['price_return'] > self.threshold) & (df['volume_change'] < 0)
-        df.loc[sell_cond, 'signal'] = -1
+        signals['Position'] = np.nan
 
-        return df['signal']
+        # Buy signal: price falls + volume falls
+        buy_cond = (price_change < -self.threshold) & (volume_change < 0)
+        signals.loc[buy_cond, 'Position'] = 1
+
+        # Sell signal: price rises + volume falls
+        sell_cond = (price_change > self.threshold) & (volume_change < 0)
+        signals.loc[sell_cond, 'Position'] = -1
+
+        # Entry signals
+        signals['Signal'] = 0
+        signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
+        signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
+
+        # Daily log return
+        signals['return'] = np.log(price / price.shift(1))
+
+        self.signal_data[stock] = signals
