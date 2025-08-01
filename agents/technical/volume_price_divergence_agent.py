@@ -47,11 +47,11 @@ class VolumePriceDivergenceAgent(TradingAgent):
 
         # Buy signal: price falls + volume falls
         buy_cond = (price_change < -self.threshold) & (volume_change < 0)
-        signals.loc[buy_cond, 'Position'] = 1
+        signals.loc[buy_cond, 'Position'] = -1
 
         # Sell signal: price rises + volume falls
         sell_cond = (price_change > self.threshold) & (volume_change < 0)
-        signals.loc[sell_cond, 'Position'] = -1
+        signals.loc[sell_cond, 'Position'] = 1
 
         # Entry signals
         signals['Signal'] = 0
