@@ -131,7 +131,7 @@ class MLBasedAgent(TradingAgent, ABC):
         signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
 
         close = self.data[(stock, 'Close')]
-        signals['return'] = np.log(close / close.shift(1)).reindex(index_used)
+        signals['return'] = np.log(close / close.shift(-1)).reindex(index_used)
         return signals
 
     def walk_forward_predict(self, stock, initial_train_size=100, step_size=1):
