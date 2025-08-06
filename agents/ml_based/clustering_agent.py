@@ -41,9 +41,9 @@ class ClusteringFilteredKNNAgent(MLBasedAgent):
                     volume = volume.loc[:as_of_date]
 
                 returns = price.pct_change()
-                momentum = price.pct_change(self.cluster_lookback).iloc[-1]
-                volatility = returns.rolling(self.cluster_lookback).std().iloc[-1]
-                avg_volume = volume.rolling(self.cluster_lookback).mean().iloc[-1]
+                momentum = price.pct_change(self.cluster_lookback).shift(1).iloc[-1]
+                volatility = returns.rolling(self.cluster_lookback).std().shift(1).iloc[-1]
+                avg_volume = volume.rolling(self.cluster_lookback).mean().shift(1).iloc[-1]
 
                 stock_features.append([momentum, volatility, avg_volume])
             except Exception:
