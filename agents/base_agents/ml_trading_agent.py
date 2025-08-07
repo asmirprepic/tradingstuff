@@ -20,7 +20,7 @@ class MLBasedAgent(TradingAgent, ABC):
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
         self.feature_cache = {}
 
-    def default_feature_engineering(self, stock, force_refresh=False):
+    def default_feature_engineering(self, stock, force_refresh=False,timing = 'open'):
         if stock in self.feature_cache and not force_refresh:
             return self.feature_cache[stock]
 
@@ -29,25 +29,45 @@ class MLBasedAgent(TradingAgent, ABC):
         if not all(col in df.columns for col in required_cols):
             raise ValueError(f"Missing required columns for {stock}")
 
-        df['OC'] = df['Open'] - df['Close']
-        df['HL'] = df['High'] - df['Low']
-        df['Return_1D'] = df['Close'].pct_change()
-        df['Return_5D'] = df['Close'].pct_change(5)
-        df['MA_5'] = df['Close'].rolling(window=5).mean()
-        df['MA_10'] = df['Close'].rolling(window=10).mean()
-        df['Momentum'] = df['Close'] - df['MA_5']
-        df['Volatility_5D'] = df['Return_1D'].rolling(5).std()
-        df['Volume_Change'] = df['Volume'].pct_change()
-        df = df.ffill()
+        r1     = df['Close'].pct_change()
+        r5     = df['Close'].pct_change(5)
+        ma5    = df['Close'].rolling(5).mean()
+        ma10   = df['Close'].rolling(10).mean()
+        vol5d  = r1.rolling(5).std()
+        volchg = df['Volume'].pct_change()
+        oc     = df['Open'] - df['Close']
+        hl     = df['High'] - df['Low']
 
+        if timing == 'open':
+            df['Return_1D']     = r1.shift(1)
+            df['Return_5D']     = r5.shift(1)
+            df['MA_5']          = ma5.shift(1)
+            df['MA_10']         = ma10.shift(1)
+            df['Momentum']      = df['Close'].shift(1) - df['MA_5']
+            df['Volatility_5D'] = vol5d.shift(1)
+            df['Volume_Change'] = volchg.shift(1)
+            df['OC']            = oc.shift(1)
+            df['HL']            = hl.shift(1)
+        else:  # close timing
+            df['Return_1D']     = r1
+            df['Return_5D']     = r5
+            df['MA_5']          = ma5
+            df['MA_10']         = ma10
+            df['Momentum']      = df['Close'] - df['MA_5']
+            df['Volatility_5D'] = vol5d
+            df['Volume_Change'] = volchg
+            df['OC']            = oc
+            df['HL']            = hl
+
+        df[self.features] = df[self.features].ffill()
         df['Target'] = np.where(df['Close'].shift(-1) > df['Close'], 1, -1)
-        df = df.dropna(subset=self.features + ['Target'])
+
+        df = df.dropna(subset=['Target'])
 
         X = df[self.features].copy()
         Y = df['Target'].copy()
         self.feature_cache[stock] = (X, Y)
-        return X, Y
-
+        return X,Y
 
 
     @abstractmethod
@@ -58,17 +78,7 @@ class MLBasedAgent(TradingAgent, ABC):
     def generate_signal_strategy(self, stock, *args, **kwargs):
         pass
 
-    def _build_signals(self, predictions, index, stock):
-        signals = pd.DataFrame(index=index)
-        signals['Prediction'] = predictions
-        signals['Position'] = (signals['Prediction'] == 1).astype(int)
-        signals['Signal'] = 0
-        signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
-        signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
 
-        close = self.data[(stock, 'Close')].reindex(index)
-        signals['return'] = np.log(close / close.shift(1))
-        return signals
 
     def create_train_split_group(self, X, Y, split_ratio):
         return train_test_split(X, Y, shuffle=False, test_size=1 - split_ratio)
@@ -131,7 +141,7 @@ class MLBasedAgent(TradingAgent, ABC):
         signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
 
         close = self.data[(stock, 'Close')]
-        signals['return'] = np.log(close / close.shift(-1)).reindex(index_used)
+        signals['return'] = np.log(close / close.shift(1)).reindex(index_used)
         return signals
 
     def walk_forward_predict(self, stock, initial_train_size=100, step_size=1):
