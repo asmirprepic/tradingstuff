@@ -61,6 +61,11 @@ class MLBasedAgent(TradingAgent, ABC):
 
         df[self.features] = df[self.features].ffill()
         df['Target'] = np.where(df['Close'].shift(-1) > df['Close'], 1, -1)
+        df[self.features] = df[self.features].replace([np.inf, -np.inf], np.nan)
+
+
+        valid_mask = df[self.features].notna().all(axis=1)
+        df = df.loc[valid_mask]
 
         df = df.dropna(subset=['Target'])
 
