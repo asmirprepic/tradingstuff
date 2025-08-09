@@ -81,15 +81,14 @@ class TradingAgent(ABC):
         pass
 
     def evaluate_performance(self):
-        results = []
+        rows = []
         for stock,df in self.signal_data.items():
-            print(stock)
             df = df.dropna(subset = ['return'])
 
             if len(df) < 2:
                 continue
 
-            strategy_return = df['return'].sum()
+            strategy_return = (df['return'] * df['Position'].shift(1)).sum()
 
             close_series = self.data[(stock,'Close')]
             signal_index = df.index[[0, -1]]
@@ -97,23 +96,34 @@ class TradingAgent(ABC):
                 close_series.loc[signal_index[-1]] / close_series.loc[signal_index[0]]
             )
 
-            cumulative_returns = df['return'].cumsum()
+            cumulative_returns = (df['return'] * df['Position'].shift(1)).cumsum()
             running_max = cumulative_returns.cummax()
             drawdown = cumulative_returns - running_max
             max_drawdown = drawdown.min()
 
             outperformance = strategy_return-buyhold_return
 
-            results.append({
+            rows.append({
                 'Stock': stock,
                 'Strategy_Return_%': round(strategy_return*100,2),
                 'BuyHold_Return_%': round(buyhold_return*100,2),
                 'Max_Drawdown_%': round(max_drawdown*100,2),
-                'Outperformance_%': round(outperformance * 100,2)
+                'Outperformance_%': round(outperformance * 100,2),
+                'Profitable': strategy_return > 0.0,
+                'Outperformed': outperformance > 0.0
             })
 
+            res = pd.DataFrame(rows)
+            if res.empty:
+                return res
 
-        return pd.DataFrame(results).sort_values(by = 'Outperformance_%',ascending=False)
+            res = res.sort_values(
+                by=['Profitable', 'Outperformance_%', 'Strategy_Return_%'],
+                ascending=[False, False, False]
+            ).reset_index(drop=True)
+
+            return res
+
 
     def plot(self, stock):
         """

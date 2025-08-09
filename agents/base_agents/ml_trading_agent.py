@@ -59,9 +59,14 @@ class MLBasedAgent(TradingAgent, ABC):
             df['OC']            = oc
             df['HL']            = hl
 
-        df[self.features] = df[self.features].ffill()
+        missing_feats = [f for f in self.features if f not in df.columns]
+        if missing_feats:
+            raise ValueError(f"{stock}: missing features {missing_feats}")
+
+        df[self.features] = df[self.features].replace([np.inf, -np.inf], np.nan).ffill()
+
         df['Target'] = np.where(df['Close'].shift(-1) > df['Close'], 1, -1)
-        df[self.features] = df[self.features].replace([np.inf, -np.inf], np.nan)
+        df = df.iloc[:-1]
 
 
         valid_mask = df[self.features].notna().all(axis=1)
@@ -149,7 +154,7 @@ class MLBasedAgent(TradingAgent, ABC):
         signals['return'] = np.log(close / close.shift(1)).reindex(index_used)
         return signals
 
-    def walk_forward_predict(self, stock, initial_train_size=100, step_size=1):
+    def walk_forward_predict(self, stock, initial_train_size=100, step_size=1,treshold = 0.5):
         """
         Perform walk-forward retraining and prediction for one stock.
 
@@ -177,7 +182,7 @@ class MLBasedAgent(TradingAgent, ABC):
 
             if hasattr(model, "predict_proba"):
                 prob = model.predict_proba(X_test)[:, 1]
-                pred = np.where(prob > 0.5, 1, -1)
+                pred = np.where(prob >treshold , 1, -1)
             else:
                 pred = model.predict(X_test)
 
