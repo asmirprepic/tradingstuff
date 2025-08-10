@@ -119,7 +119,7 @@ class MLBasedAgent(TradingAgent, ABC):
 
         return metrics
 
-    def predict_signals(self, stock, mode='backtest', threshold=0.5):
+    def predict_signals(self, stock, mode='backtest', threshold=0.5,timing = 'open'):
         if stock not in self.models:
             raise ValueError(f"Model for {stock} has not been trained.")
 
@@ -140,6 +140,10 @@ class MLBasedAgent(TradingAgent, ABC):
         if hasattr(model, "predict_proba"):
             prob = model.predict_proba(X_pred)[:, 1]
             predictions = np.where(prob > threshold, 1, -1)
+        elif hasattr(model,"descision_function"):
+            score = model.descision_function(X_pred)
+            thr = 0.0 if threshold == 0.5 else np.quantile(score, threshold)  # optional alt
+            predictions = np.where(score > thr, 1, -1)
         else:
             predictions = model.predict(X_pred)
 
@@ -154,7 +158,7 @@ class MLBasedAgent(TradingAgent, ABC):
         signals['return'] = np.log(close / close.shift(1)).reindex(index_used)
         return signals
 
-    def walk_forward_predict(self, stock, initial_train_size=100, step_size=1,treshold = 0.5):
+    def walk_forward_predict(self, stock, initial_train_size=100, step_size=1,threshold = 0.5):
         """
         Perform walk-forward retraining and prediction for one stock.
 
@@ -182,7 +186,7 @@ class MLBasedAgent(TradingAgent, ABC):
 
             if hasattr(model, "predict_proba"):
                 prob = model.predict_proba(X_test)[:, 1]
-                pred = np.where(prob >treshold , 1, -1)
+                pred = np.where(prob >threshold , 1, -1)
             else:
                 pred = model.predict(X_test)
 

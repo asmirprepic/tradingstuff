@@ -121,7 +121,7 @@ class GetTickers:
         }
 
         try:
-            logging.info("Fetching tickers for region: %s, market_cap_min: %s, market_cap_max: %s", 
+            logging.info("Fetching tickers for region: %s, market_cap_min: %s, market_cap_max: %s",
                         region, market_cap_min, market_cap_max)
             time.sleep(1)  # Rate limiting
             response = self.session.post(

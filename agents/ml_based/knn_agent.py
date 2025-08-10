@@ -51,5 +51,8 @@ class KNNAgent(MLBasedAgent):
         if stock not in self.models:
             self.train_model(stock)
 
+        self.signal_data[stock] = self.predict_signals(
+            stock, mode=mode, threshold=self.proba_threshold
+        )
+        return self.signal_data[stock]
 
-        self.signal_data[stock] = self.predict_signals(stock, mode=mode)

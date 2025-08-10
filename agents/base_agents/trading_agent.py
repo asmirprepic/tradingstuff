@@ -110,19 +110,19 @@ class TradingAgent(ABC):
                 'Max_Drawdown_%': round(max_drawdown*100,2),
                 'Outperformance_%': round(outperformance * 100,2),
                 'Profitable': strategy_return > 0.0,
-                'Outperformed': outperformance > 0.0
+               # 'Outperformed': outperformance > 0.0
             })
 
-            res = pd.DataFrame(rows)
-            if res.empty:
-                return res
-
-            res = res.sort_values(
-                by=['Profitable', 'Outperformance_%', 'Strategy_Return_%'],
-                ascending=[False, False, False]
-            ).reset_index(drop=True)
-
+        res = pd.DataFrame(rows)
+        if res.empty:
             return res
+
+        res = res.sort_values(
+            by=['Profitable', 'Outperformance_%', 'Strategy_Return_%'],
+            ascending=[False, False, False]
+        ).reset_index(drop=True)
+
+        return res
 
 
     def plot(self, stock):
