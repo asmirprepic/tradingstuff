@@ -2,12 +2,18 @@ from agents.base_agents.ml_trading_agent import MLBasedAgent
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
 import numpy as np
 import pandas as pd
 
 class ClusteringFilteredKNNAgent(MLBasedAgent):
     def __init__(self, data, n_neighbors=10, n_clusters=3, cluster_lookback=20):
-        model = KNeighborsClassifier(n_neighbors=n_neighbors)
+        model = Pipeline([
+            ('scaler', StandardScaler()),
+            ('knn', KNeighborsClassifier(n_neighbors=n_neighbors, weights='distance'))
+        ])
+
         features = ['Return_1D', 'OC', 'HL']
         super().__init__(data, model=model, features=features)
 

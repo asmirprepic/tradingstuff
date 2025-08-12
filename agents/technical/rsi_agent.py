@@ -11,8 +11,8 @@ class RSIAgent(TradingAgent):
     The agent considers both long and short positions based on the RSI being overbought or oversold.
 
     Args:
-        data (pd.DataFrame): A DataFrame containing the stock prices. 
-                             It should have a MultiIndex of (stock_symbol, data_type) 
+        data (pd.DataFrame): A DataFrame containing the stock prices.
+                             It should have a MultiIndex of (stock_symbol, data_type)
                              where data_type includes 'Close'.
         period (int, optional): The number of periods to calculate the RSI. Defaults to 14.
         upper_band (float, optional): The upper RSI threshold to indicate overbought conditions. Defaults to 70.
@@ -26,7 +26,7 @@ class RSIAgent(TradingAgent):
         price_type (str): Data type for price, set to 'Close'.
         signal_data (dict): A dictionary to store signal data for each stock.
     """
-  
+
   def __init__(self,data,period = 14,upper_band = 70,lower_band =30):
     super().__init__(data)
     self.algorithm_name='RSI'
@@ -43,8 +43,8 @@ class RSIAgent(TradingAgent):
 
   def generate_signal_strategy(self,stock):
     """
-      Generates trading signals for the specified stock based on the RSI indicator. 
-      A long position is considered when RSI is below the lower threshold (oversold), 
+      Generates trading signals for the specified stock based on the RSI indicator.
+      A long position is considered when RSI is below the lower threshold (oversold),
       and a short position is considered when RSI is above the upper threshold (overbought).
 
       Args:
@@ -69,7 +69,7 @@ class RSIAgent(TradingAgent):
     signals.loc[signals['RSI']<self.lower_band,'Position'] =1
     signals.loc[signals['RSI']>self.upper_band,'Position'] =-1
 
-    
+
     # Forward fill positions to maintain until explicitly changed
     #signals['Position'] = signals['Position'].ffill()
 
@@ -85,4 +85,3 @@ class RSIAgent(TradingAgent):
 
 
 
-    

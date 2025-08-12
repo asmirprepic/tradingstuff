@@ -140,8 +140,8 @@ class MLBasedAgent(TradingAgent, ABC):
         if hasattr(model, "predict_proba"):
             prob = model.predict_proba(X_pred)[:, 1]
             predictions = np.where(prob > threshold, 1, -1)
-        elif hasattr(model,"descision_function"):
-            score = model.descision_function(X_pred)
+        elif hasattr(model,"decision_function"):
+            score = model.decision_function(X_pred)
             thr = 0.0 if threshold == 0.5 else np.quantile(score, threshold)  # optional alt
             predictions = np.where(score > thr, 1, -1)
         else:
