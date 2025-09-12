@@ -15,12 +15,12 @@ class HighLowAgent(TradingAgent):
   def __init__(self, data):
       super().__init__(data)
       self.algorithm_name = "HighLow"
-      self.high_lookback = 100  # Look back for 50 points for highs
-      self.low_lookback = 90   # Look back for 40 points for lows
+      self.high_lookback = 50  # Look back for 50 points for highs
+      self.low_lookback = 40   # Look back for 40 points for lows
 
       self.stocks_in_data = self.data.columns.get_level_values(0).unique()
-      
-      # Handle multiple stocks
+
+
       for stock in self.stocks_in_data:
           self.generate_signal_strategy(stock)
 
@@ -70,7 +70,7 @@ class HighLowAgent(TradingAgent):
 
       # Calculate positions for visualization and trading signals
       signals['position'] = signals['Position']
-      
+
       self.signal_data[stock] = signals
 
   def plot(self, stock):
