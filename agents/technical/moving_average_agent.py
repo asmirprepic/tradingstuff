@@ -26,7 +26,6 @@ class MovingAverageAgent(TradingAgent):
     """
 
     def __init__(self, data, short_window=50, long_window=200, price_type='Close', auto_generate=True):
-    def __init__(self, data, short_window=50, long_window=200, price_type='Close', auto_generate=True):
         super().__init__(data)
         self.algorithm_name = "MovingAverage"
         self.short_window = short_window

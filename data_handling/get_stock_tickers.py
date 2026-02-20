@@ -72,7 +72,7 @@ class GetTickers:
             'formatted': 'true',
             'useRecordsResponse': 'true',
             'lang': 'en-US',
-            'region': 'US',
+            'region': region,
             'crumb': self.crumb,
         }
 
@@ -163,6 +163,10 @@ class GetTickers:
             time.sleep(2)  # Rate limiting
 
         return cap_results
+
+    def get_tickers_by_market_cap(self, region):
+        """Fetch and categorize tickers by market cap."""
+        return self._processTickers(region)
 
     def close(self):
         """Close the session."""

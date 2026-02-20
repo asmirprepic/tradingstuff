@@ -42,6 +42,7 @@ class GetStockDataTest:
     self.end_date=pd.to_datetime(enddate)
     self.data_types = data_types if isinstance(data_types,list) else [data_types]
     self.interval = interval
+    self.data = None
     
     
 
@@ -73,7 +74,8 @@ class GetStockDataTest:
     if self.interval.endswith('m'):
             combined_data = self._filter_trading_hours(combined_data)
     
-    return self._process_yfinance_data(combined_data)
+    self.data = self._process_yfinance_data(combined_data)
+    return self.data
 
   def _process_yfinance_data(self, raw_data):
       """
@@ -92,10 +94,17 @@ class GetStockDataTest:
           return pd.DataFrame()  # Or handle this case differently based on your needs
 
       raw_data.reset_index(inplace=True)
-      if "m" in self.interval: 
-        raw_data.set_index(['Date', 'Stock'], inplace=True)
-      else: 
-        raw_data.set_index(['Date','Stock'],inplace = True)
+
+      # yfinance uses 'Date' for daily and typically 'Datetime' for intraday.
+      index_col = None
+      if 'Date' in raw_data.columns:
+        index_col = 'Date'
+      elif 'Datetime' in raw_data.columns:
+        index_col = 'Datetime'
+      else:
+        index_col = raw_data.columns[0]
+
+      raw_data.set_index([index_col, 'Stock'], inplace=True)
         
       raw_data = raw_data[self.data_types]
       processed_data = raw_data.unstack(level='Stock')
@@ -127,7 +136,7 @@ class GetStockDataTest:
     
     filtered_data = data[data.index.map(is_trading_time)]
 
-    return data.sort_index(axis=1)
+    return filtered_data.sort_index()
   
   def update_data(self):
     """
@@ -141,6 +150,9 @@ class GetStockDataTest:
     today = pd.Timestamp.now().date()  # Use pd.Timestamp to ensure compatibility
     current_time = pd.Timestamp.now().time()
     print(f"Updating data at {current_time} on {today}")
+
+    if not hasattr(self, 'data') or self.data is None:
+        self.data = pd.DataFrame()
 
     if self.start_date.date() <= today <= self.end_date.date():  # Ensure date comparison
         all_data = []
@@ -159,14 +171,17 @@ class GetStockDataTest:
             combined_data = self._filter_trading_hours(combined_data)
             new_data = self._process_yfinance_data(combined_data)
             # Check for updates
-            new_rows = new_data[~new_data.index.isin(self.data.index)]
+            new_rows = new_data if self.data.empty else new_data[~new_data.index.isin(self.data.index)]
             if not new_rows.empty:
                 print("New data available, updating...")
                 print(new_rows)
             else:
                 print("No new data to update.")
             # Update self.data with the new data, replacing any overlapping rows
-            self.data.update(new_data)
-            self.data = pd.concat([self.data, new_data[~new_data.index.isin(self.data.index)]])
+            if self.data.empty:
+                self.data = new_data
+            else:
+                self.data.update(new_data)
+                self.data = pd.concat([self.data, new_data[~new_data.index.isin(self.data.index)]])
 
     return self.data
