@@ -29,7 +29,9 @@ def make_synthetic_prices(tickers, periods=30):
         noise = (pd.Series(range(periods)) * 0.01).values
         vals = base + (noise * (1 + i * 0.1))
         s = pd.Series(vals, index=idx)
-        df = pd.DataFrame({(t, 'Close'): s})
+        # include a synthetic Volume series so --include-volume works in synthetic mode
+        vol = pd.Series((1_000_000 + i * 250_000) + (pd.Series(range(periods)) * 1000).values, index=idx)
+        df = pd.DataFrame({(t, 'Close'): s, (t, 'Volume'): vol})
         df.columns = pd.MultiIndex.from_tuples(df.columns)
         frames.append(df)
     combined = pd.concat(frames, axis=1).sort_index()
@@ -67,9 +69,11 @@ def enrich_with_market_cap(tickers):
     return market_caps
 
 
-def enrich_with_volume_metrics(price_df, tickers):
+def enrich_with_volume_metrics(price_df, tickers, window: int = 20):
     avg_vol = {}
     dollar_vol = {}
+    latest_vol = {}
+    latest_dollar_vol = {}
 
     for t in tickers:
         v_col = (t, "Volume")
@@ -86,14 +90,23 @@ def enrich_with_volume_metrics(price_df, tickers):
         if v is None or v.empty:
             avg_vol[t] = None
             dollar_vol[t] = None
+            latest_vol[t] = None
+            latest_dollar_vol[t] = None
             continue
 
         last_close = float(c.iloc[-1]) if c is not None and not c.empty else None
-        a = float(v.mean())
+        w = max(int(window), 1)
+        v_tail = v.tail(w)
+
+        a = float(v_tail.mean())
+        lv = float(v.iloc[-1])
+
         avg_vol[t] = a
         dollar_vol[t] = (a * last_close) if last_close is not None else None
+        latest_vol[t] = lv
+        latest_dollar_vol[t] = (lv * last_close) if last_close is not None else None
 
-    return avg_vol, dollar_vol
+    return avg_vol, dollar_vol, latest_vol, latest_dollar_vol
 
 
 def enrich_with_latest_signal_features(agent):
@@ -129,14 +142,19 @@ def main(argv=None):
     parser.add_argument('--top_n', type=int, default=None, help='Return top N stocks')
     parser.add_argument('--long-only', action='store_true', help='Long-only mode (negative signals become flat)')
     parser.add_argument('--score-mode', type=str, default='z', help="Momentum scoring mode: 'z' (default) or 'raw'")
-    parser.add_argument('--sort-by', type=str, default='SignalStrength', help='Sort key: SignalStrength, Score, MarketCap, AvgVolume, DollarVolume')
+    parser.add_argument(
+        '--sort-by',
+        type=str,
+        default='SignalStrength',
+        help='Sort key: SignalStrength, Score, MarketCap, AvgVolume, DollarVolume, LatestVolume, LatestDollarVolume',
+    )
     parser.add_argument('--min-market-cap', type=float, default=None, help='If set, filter out tickers with MarketCap below this value')
     parser.add_argument('--min-avg-volume', type=float, default=None, help='If set, filter out tickers with AvgVolume below this value')
     parser.add_argument('--min-dollar-volume', type=float, default=None, help='If set, filter out tickers with DollarVolume below this value')
     parser.add_argument('--enrich-market-cap', action='store_true', help='Fetch MarketCap via yfinance for sorting/filtering (slower)')
     parser.add_argument('--include-volume', action='store_true', help='Fetch Volume in addition to Close to compute liquidity metrics')
+    parser.add_argument('--volume-window', type=int, default=20, help='Window (periods) used for AvgVolume/DollarVolume when --include-volume is set')
     parser.add_argument('--output', type=str, default='recommendations.csv', help='Output CSV path')
-    parser.add_argument('--use_synthetic', action='store_true', help='Use synthetic data instead of Yahoo')
 
     args = parser.parse_args(argv)
 
@@ -185,30 +203,27 @@ def main(argv=None):
     else:
         tickers = [t.strip() for t in args.tickers.split(',') if t.strip()]
 
-    if args.use_synthetic:
-        print('Using synthetic data for tickers:', tickers)
-        price_df = make_synthetic_prices(tickers, periods=60)
-    else:
-        start = args.start
-        end = args.end
 
-        if (start is None or end is None) and args.lookback_days is not None:
-            end_ts = pd.Timestamp.today().normalize()
-            start_ts = (end_ts - pd.tseries.offsets.BDay(args.lookback_days))
-            start = start_ts.strftime('%Y-%m-%d')
-            end = end_ts.strftime('%Y-%m-%d')
+    start = args.start
+    end = args.end
 
-        if not start or not end:
-            raise SystemExit('When not using synthetic data, provide --start and --end, or use --lookback-days')
+    if (start is None or end is None) and args.lookback_days is not None:
+        end_ts = pd.Timestamp.today().normalize()
+        start_ts = (end_ts - pd.tseries.offsets.BDay(args.lookback_days))
+        start = start_ts.strftime('%Y-%m-%d')
+        end = end_ts.strftime('%Y-%m-%d')
 
-        print(f'Fetching data for {tickers} from {start} to {end} (interval={args.interval})...')
+    if not start or not end:
+        raise SystemExit('When not using synthetic data, provide --start and --end, or use --lookback-days')
 
-        data_types = ['Close']
-        if args.include_volume:
-            data_types.append('Volume')
+    print(f'Fetching data for {tickers} from {start} to {end} (interval={args.interval})...')
 
-        getter = GetStockDataTest(stocks=tickers, startdate=start, enddate=end, interval=args.interval, data_types=data_types)
-        price_df = getter.getData()
+    data_types = ['Close']
+    if args.include_volume:
+        data_types.append('Volume')
+
+    getter = GetStockDataTest(stocks=tickers, startdate=start, enddate=end, interval=args.interval, data_types=data_types)
+    price_df = getter.getData()
 
     if price_df.empty:
         raise SystemExit('No price data available')
@@ -227,18 +242,24 @@ def main(argv=None):
 
     recs = recommendations_from_agent(agent, persistence=args.persistence, top_n=None, save_path=None)
 
+    # Backward-compatible enrichment (only fill if missing)
     latest = enrich_with_latest_signal_features(agent)
     if not recs.empty:
-        recs['AsOf'] = recs['Stock'].map(lambda s: latest.get(s, {}).get('AsOf'))
-        if any('SignalStrength' in v for v in latest.values()):
+        if 'AsOf' not in recs.columns:
+            recs['AsOf'] = recs['Stock'].map(lambda s: latest.get(s, {}).get('AsOf'))
+        if 'SignalStrength' not in recs.columns and any('SignalStrength' in v for v in latest.values()):
             recs['SignalStrength'] = recs['Stock'].map(lambda s: latest.get(s, {}).get('SignalStrength'))
-        if any('Momentum' in v for v in latest.values()):
+        if 'Momentum' not in recs.columns and any('Momentum' in v for v in latest.values()):
             recs['Momentum'] = recs['Stock'].map(lambda s: latest.get(s, {}).get('Momentum'))
 
     if args.include_volume:
-        avg_vol, dollar_vol = enrich_with_volume_metrics(price_df, list(agent.signal_data.keys()))
+        avg_vol, dollar_vol, latest_vol, latest_dollar_vol = enrich_with_volume_metrics(
+            price_df, list(agent.signal_data.keys()), window=args.volume_window
+        )
         recs['AvgVolume'] = recs['Stock'].map(avg_vol)
         recs['DollarVolume'] = recs['Stock'].map(dollar_vol)
+        recs['LatestVolume'] = recs['Stock'].map(latest_vol)
+        recs['LatestDollarVolume'] = recs['Stock'].map(latest_dollar_vol)
 
     if args.enrich_market_cap:
         caps = enrich_with_market_cap(list(agent.signal_data.keys()))
