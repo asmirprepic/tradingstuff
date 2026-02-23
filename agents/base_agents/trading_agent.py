@@ -31,6 +31,7 @@ class TradingAgent(ABC):
         self.data = data
         self.signal_data = {}
         self.returns_data = {}
+        self.score_column = None
 
     def calculate_returns(self):
         """
@@ -123,6 +124,66 @@ class TradingAgent(ABC):
         ).reset_index(drop=True)
 
         return res
+
+
+    def latest_row(self, stock: str) -> pd.Series:
+        if stock not in self.signal_data:
+            raise KeyError(f"No signal data for stock={stock}")
+        df = self.signal_data[stock]
+        # Drop rows where return is nan (early part)
+        df = df.dropna(subset=["return"]) if "return" in df.columns else df.dropna()
+        if df.empty:
+            raise ValueError(f"Signal data for {stock} is empty after dropping NaNs.")
+        return df.iloc[-1]
+
+    def action_now(self, stock: str) -> dict:
+        """
+        Interprets the most recent signal as an action for the *next* period.
+        """
+        row = self.latest_row(stock)
+        ts = row.name
+
+        pos = int(row.get("Position", 0))
+        sig = int(row.get("Signal", 0))
+
+
+        if sig == 1:
+            action = "BUY"
+        elif sig == -1:
+            action = "SELL"
+        else:
+            action = "HOLD (LONG)" if pos == 1 else ("HOLD (SHORT)" if pos == -1 else "HOLD (FLAT)")
+
+        return {
+            "Stock": stock,
+            "Timestamp": ts,
+            "Action": action,
+            "Position": pos,
+            "Signal": sig,
+
+        }
+
+    def score_now(self, stock: str) -> float:
+        """
+        Generic 'strength' score used to rank recommendations right now.
+
+        Default behavior:
+          1) If agent sets self.score_column and it exists -> use it
+          2) Else if a 'Score' column exists -> use it
+          3) Else fall back to 0.0 (or historical return if you prefer)
+        """
+        row = self.latest_row(stock)
+
+        if self.score_column and self.score_column in row.index:
+            val = row.get(self.score_column)
+            return float(val) if pd.notna(val) else float("nan")
+
+        for col in ("Score", "Strength", "Edge", "Alpha"):
+            if col in row.index:
+                val = row.get(col)
+                return float(val) if pd.notna(val) else float("nan")
+
+        return float("nan")
 
 
     def plot(self, stock):
