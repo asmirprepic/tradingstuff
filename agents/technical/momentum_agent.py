@@ -14,6 +14,8 @@ class MomentumAgent(TradingAgent):
     def __init__(self, data, back_length=1, lookbacks=None, long_only: bool = False, score_mode: str = "z"):
         super().__init__(data)
         self.algorithm_name = "Momentum"
+        # Used by TradingAgent.score_now() for ranking "today" recommendations.
+        self.score_column = "SignalStrength"
 
         if lookbacks is None:
             if isinstance(back_length, (list, tuple, set, np.ndarray)):
