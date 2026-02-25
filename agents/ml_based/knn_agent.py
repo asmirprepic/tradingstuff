@@ -30,12 +30,13 @@ class KNNAgent(MLBasedAgent):
         self.algorithm_name = "KNN"
         self.timing = timing
         self.proba_threshold = proba_threshold
+        self.score_column = "SignalStrength"
 
     def feature_engineering(self, stock):
         """
         Uses the default feature engineering: Open-Close and High-Low.
         """
-        return self.default_feature_engineering(stock)
+        return self.default_feature_engineering(stock, timing=self.timing)
 
     def generate_signal_strategy(self, stock, mode='backtest'):
         """
