@@ -14,6 +14,8 @@ class MLBasedAgent(TradingAgent, ABC):
         self._base_model = model
         self.features = features
         self.algorithm_name = 'MLBaseAlgorithm'
+        # Default ranking column for "today" recommendations (when available).
+        self.score_column = "SignalStrength"
         self.models = {}
         self.train_data = {}
         self.signal_data = {}
@@ -21,8 +23,9 @@ class MLBasedAgent(TradingAgent, ABC):
         self.feature_cache = {}
 
     def default_feature_engineering(self, stock, force_refresh=False,timing = 'open'):
-        if stock in self.feature_cache and not force_refresh:
-            return self.feature_cache[stock]
+        cache_key = (stock, timing)
+        if cache_key in self.feature_cache and not force_refresh:
+            return self.feature_cache[cache_key]
 
         df = self.data[stock].copy()
         required_cols = ['Open', 'Close', 'High', 'Low', 'Volume']
@@ -76,7 +79,7 @@ class MLBasedAgent(TradingAgent, ABC):
 
         X = df[self.features].copy()
         Y = df['Target'].copy()
-        self.feature_cache[stock] = (X, Y)
+        self.feature_cache[cache_key] = (X, Y)
         return X,Y
 
 
@@ -138,8 +141,18 @@ class MLBasedAgent(TradingAgent, ABC):
             raise ValueError("mode must be 'backtest' or 'live'")
 
         if hasattr(model, "predict_proba"):
-            prob = model.predict_proba(X_pred)[:, 1]
-            predictions = np.where(prob > threshold, 1, -1)
+            proba = model.predict_proba(X_pred)
+            classes = getattr(model, "classes_", None)
+
+            prob_up = None
+            if classes is not None and 1 in set(classes):
+                up_idx = list(classes).index(1)
+                prob_up = proba[:, up_idx]
+            else:
+                # Fallback: treat the "highest probability" class as the chosen one.
+                prob_up = proba.max(axis=1)
+
+            predictions = np.where(prob_up > threshold, 1, -1)
         elif hasattr(model,"decision_function"):
             score = model.decision_function(X_pred)
             thr = 0.0 if threshold == 0.5 else np.quantile(score, threshold)  # optional alt
@@ -149,6 +162,10 @@ class MLBasedAgent(TradingAgent, ABC):
 
         signals = pd.DataFrame(index=index_used)
         signals['Prediction'] = predictions
+        if hasattr(model, "predict_proba"):
+            signals["ProbUp"] = prob_up
+            # Standard "strength" for ranking (0..1). Agents can override score_column if desired.
+            signals["SignalStrength"] = prob_up
         signals['Position'] = (signals['Prediction'] == 1).astype(int)
         signals['Signal'] = 0
         signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
@@ -172,6 +189,7 @@ class MLBasedAgent(TradingAgent, ABC):
         """
         X, Y = self.feature_engineering(stock)
         predictions = []
+        prob_ups = []
         indices = []
 
         for start in range(initial_train_size, len(X) - step_size + 1, step_size):
@@ -185,8 +203,16 @@ class MLBasedAgent(TradingAgent, ABC):
 
 
             if hasattr(model, "predict_proba"):
-                prob = model.predict_proba(X_test)[:, 1]
-                pred = np.where(prob >threshold , 1, -1)
+                proba = model.predict_proba(X_test)
+                classes = getattr(model, "classes_", None)
+                if classes is not None and 1 in set(classes):
+                    up_idx = list(classes).index(1)
+                    prob_up = proba[:, up_idx]
+                else:
+                    prob_up = proba.max(axis=1)
+
+                pred = np.where(prob_up > threshold, 1, -1)
+                prob_ups.extend(prob_up.tolist())
             else:
                 pred = model.predict(X_test)
 
@@ -196,6 +222,9 @@ class MLBasedAgent(TradingAgent, ABC):
 
         signals = pd.DataFrame(index=indices)
         signals['Prediction'] = predictions
+        if prob_ups:
+            signals["ProbUp"] = prob_ups
+            signals["SignalStrength"] = signals["ProbUp"]
         signals['Position'] = (signals['Prediction'] == 1).astype(int)
         signals['Signal'] = 0
         signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
