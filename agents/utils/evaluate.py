@@ -109,7 +109,12 @@ def recommendations_from_agent(agent, persistence=1, min_score=None, top_n=None,
             action = "BUY" if last_sig == 1 else ("SELL" if last_sig == -1 else "HOLD")
 
         latest_features = {}
-        for col in ("SignalStrength", "Momentum"):
+        extra_cols = ["SignalStrength", "Momentum"]
+        score_col = getattr(agent, "score_column", None)
+        if score_col and score_col not in extra_cols:
+            extra_cols.append(score_col)
+
+        for col in extra_cols:
             if col in signals.columns:
                 try:
                     latest_features[col] = float(latest.get(col))

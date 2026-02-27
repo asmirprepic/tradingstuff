@@ -1,5 +1,6 @@
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Ensure repo root is on sys.path so imports work when invoked from repo root
@@ -155,8 +156,32 @@ def main(argv=None):
     parser.add_argument('--include-volume', action='store_true', help='Fetch Volume in addition to Close to compute liquidity metrics')
     parser.add_argument('--volume-window', type=int, default=20, help='Window (periods) used for AvgVolume/DollarVolume when --include-volume is set')
     parser.add_argument('--output', type=str, default='recommendations.csv', help='Output CSV path')
+    parser.add_argument(
+        '--timestamp-output',
+        action='store_true',
+        help='Write to a timestamped filename instead of overwriting. '
+             'If --output contains "{ts}", it will be replaced with a timestamp like 20260222_153012.',
+    )
+    parser.add_argument('--use-synthetic', action='store_true', help='Use synthetic data instead of Yahoo (for offline testing)')
 
     args = parser.parse_args(argv)
+
+    def resolve_output_path(path_str: str) -> str:
+        if not path_str:
+            return path_str
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        if "{ts}" in path_str:
+            return path_str.replace("{ts}", ts)
+
+        if args.timestamp_output:
+            p = Path(path_str)
+            suffix = p.suffix or ".csv"
+            stem = p.stem if p.suffix else p.name
+            return str(p.with_name(f"{stem}_{ts}{suffix}"))
+
+        return path_str
 
     def read_tickers_file(path):
         p = Path(path)
@@ -204,26 +229,30 @@ def main(argv=None):
         tickers = [t.strip() for t in args.tickers.split(',') if t.strip()]
 
 
-    start = args.start
-    end = args.end
+    if args.use_synthetic:
+        print('Using synthetic data for tickers:', tickers)
+        price_df = make_synthetic_prices(tickers, periods=60)
+    else:
+        start = args.start
+        end = args.end
 
-    if (start is None or end is None) and args.lookback_days is not None:
-        end_ts = pd.Timestamp.today().normalize()
-        start_ts = (end_ts - pd.tseries.offsets.BDay(args.lookback_days))
-        start = start_ts.strftime('%Y-%m-%d')
-        end = end_ts.strftime('%Y-%m-%d')
+        if (start is None or end is None) and args.lookback_days is not None:
+            end_ts = pd.Timestamp.today().normalize()
+            start_ts = (end_ts - pd.tseries.offsets.BDay(args.lookback_days))
+            start = start_ts.strftime('%Y-%m-%d')
+            end = end_ts.strftime('%Y-%m-%d')
 
-    if not start or not end:
-        raise SystemExit('When not using synthetic data, provide --start and --end, or use --lookback-days')
+        if not start or not end:
+            raise SystemExit('Provide --start and --end, or use --lookback-days (unless --use-synthetic).')
 
-    print(f'Fetching data for {tickers} from {start} to {end} (interval={args.interval})...')
+        print(f'Fetching data for {tickers} from {start} to {end} (interval={args.interval})...')
 
-    data_types = ['Close']
-    if args.include_volume:
-        data_types.append('Volume')
+        data_types = ['Close']
+        if args.include_volume:
+            data_types.append('Volume')
 
-    getter = GetStockDataTest(stocks=tickers, startdate=start, enddate=end, interval=args.interval, data_types=data_types)
-    price_df = getter.getData()
+        getter = GetStockDataTest(stocks=tickers, startdate=start, enddate=end, interval=args.interval, data_types=data_types)
+        price_df = getter.getData()
 
     if price_df.empty:
         raise SystemExit('No price data available')
@@ -285,12 +314,13 @@ def main(argv=None):
     if args.top_n is not None:
         recs = recs.head(args.top_n)
 
-    if args.output:
-        recs.to_csv(args.output, index=False)
+    out_path = resolve_output_path(args.output)
+    if out_path:
+        recs.to_csv(out_path, index=False)
 
     print('\nRecommendations:')
     print(recs)
-    print(f'Wrote recommendations to {args.output}')
+    print(f'Wrote recommendations to {out_path}')
 
     return recs
 
