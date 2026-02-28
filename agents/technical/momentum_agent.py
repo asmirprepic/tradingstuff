@@ -38,13 +38,13 @@ class MomentumAgent(TradingAgent):
 
         self.price_type = 'Close'
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
-    
 
-      
+
+
         # Handle multiple stocks
         for stock in self.stocks_in_data:
           self.generate_signal_strategy(stock)
-        
+
         self.calculate_returns()
 
 
@@ -59,14 +59,15 @@ class MomentumAgent(TradingAgent):
         signals = pd.DataFrame(index = self.data.index)
         # Log return calculation
         signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
-        
+        price = self.data[(stock,'Close')]
         mom_cols = []
         z_cols = []
         for lb in self.lookbacks:
             mom_col = f"Momentum_{lb}"
             z_col = f"MomentumZ_{lb}"
 
-            mom = signals['return'].rolling(lb).mean()
+            #mom = signals['return'].rolling(lb).mean()
+            mom = np.log(price / price.shift(lb))
             vol = signals['return'].rolling(lb).std(ddof=0).replace(0, np.nan)
             z = mom / vol
 
@@ -96,8 +97,8 @@ class MomentumAgent(TradingAgent):
         signals['Signal'] = signals['Position'].diff().fillna(0).astype(int)
         signals['Signal'] = signals['Signal'].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
 
-        # Store the signals 
+        # Store the signals
         self.signal_data[stock] = signals
 
-   
-        
+
+
