@@ -47,22 +47,17 @@ class HighLowAgent(TradingAgent):
       # Determine buy and sell signals
       signals['buy_signal'] = signals['price'] > signals['rolling_max'].shift(1)
       signals['sell_signal'] = signals['price'] < signals['rolling_min'].shift(1)
+      signals['Position'] = 0
+      long_entry = (signals['Position'].shift(1) == 0) & signals['buy_signal']
+      short_entry = (signals['Position'].shift(1) == 0) & signals['sell_signal']
+      exit_signal = ((signals['Position'].shift(1) == 1) & signals['sell_signal']) | \
+              ((signals['Position'].shift(1) == -1) & signals['buy_signal'])
 
-      for i in range(1, len(signals)):
-        # If the previous position is 0 and we have a buy signal, go long
-        if signals['Position'][i-1] == 0 and signals['buy_signal'][i]:
-            signals.at[signals.index[i], 'Position'] = 1
-        # If the previous position is 0 and we have a sell signal, go short
-        elif signals['Position'][i-1] == 0 and signals['sell_signal'][i]:
-            signals.at[signals.index[i], 'Position'] = -1
-        # If we have no new signal and the previous position is not 0, hold the position
-        elif not signals['buy_signal'][i] and not signals['sell_signal'][i]:
-            signals.at[signals.index[i], 'Position'] = signals['Position'][i-1]
-        # If we have an opposite signal, close the position
-        elif (signals['Position'][i-1] == 1 and signals['sell_signal'][i]) or \
-              (signals['Position'][i-1] == -1 and signals['buy_signal'][i]):
-            signals.at[signals.index[i], 'Position'] = 0
+      signals.loc[long_entry, 'Position'] = 1
+      signals.loc[short_entry, 'Position'] = -1
+      signals.loc[exit_signal, 'Position'] = 0
 
+      signals['Position'] = signals['Position'].replace(0, np.nan).fillna(method='ffill').fillna(0)
 
       signals['Signal'] = signals['Position'].diff()
       signals['Signal'] = signals['Signal'].apply(lambda x: max(min(x, 1), -1))

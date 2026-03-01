@@ -1,7 +1,7 @@
 import pandas as pd
 
 
-def recommendations_from_agent(agent, persistence=1, min_score=None, top_n=None, save_path=None):
+def evaluations_from_agent(agent, persistence=1, min_score=None, top_n=None, save_path=None):
     """Generate ranked per-stock recommendations from a trading agent.
 
     Args:

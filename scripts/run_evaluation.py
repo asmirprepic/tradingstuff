@@ -13,7 +13,7 @@ import pandas as pd
 from data_handling.get_stock_data import GetStockDataTest
 from data_handling.get_stock_tickers_upd import GetTickers
 from agents.technical.momentum_agent import MomentumAgent
-from agents.utils.recommendations import recommendations_from_agent
+from agents.utils.evaluate import evaluations_from_agent
 
 try:
     import yfinance as yf
@@ -269,7 +269,7 @@ def main(argv=None):
         score_mode=args.score_mode,
     )
 
-    recs = recommendations_from_agent(agent, persistence=args.persistence, top_n=None, save_path=None)
+    recs = evaluations_from_agent(agent, persistence=args.persistence, top_n=None, save_path=None)
 
     # Backward-compatible enrichment (only fill if missing)
     latest = enrich_with_latest_signal_features(agent)
