@@ -61,6 +61,7 @@ class HighLowAgent(TradingAgent):
 
       signals['Signal'] = signals['Position'].diff()
       signals['Signal'] = signals['Signal'].apply(lambda x: max(min(x, 1), -1))
+
       signals['return'] = np.log(price/price.shift(1))
 
       # Calculate positions for visualization and trading signals
