@@ -62,10 +62,11 @@ class TradingAgent(ABC):
         """
 
         algorithm_name = self.algorithm_name
+        signals = signals.dropna(subset=['return', 'Position'])
         signals['agent_returns'] = signals['return']*signals['Position'].shift(1)
         strategy_return = round(signals['agent_returns'].sum()*100,3)
         buy_and_hold_return = round(signals['return'].sum()*100,3)
-        total_entries = signals.Position.sum()
+        total_entries = int(signals['Position'].diff().fillna(0).abs().sum() / 2)
         return strategy_return,buy_and_hold_return,total_entries
 
     @abstractmethod
@@ -143,17 +144,21 @@ class TradingAgent(ABC):
         row = self.latest_row(stock)
         ts = row.name
 
-        pos = int(row.get("Position", 0))
-        sig = int(row.get("Signal", 0))
+        sig = int(row.get("Signal", 0)) if pd.notna(row.get("Signal")) else 0
+        pos = int(row.get("Position", 0)) if pd.notna(row.get("Position")) else 0
+
 
 
         if sig == 1:
             action = "BUY"
         elif sig == -1:
             action = "SELL"
+        elif pos == 1:
+            action = "HOLD (LONG)"
+        elif pos == -1:
+            action = "HOLD (SHORT)"
         else:
-            action = "HOLD (LONG)" if pos == 1 else ("HOLD (SHORT)" if pos == -1 else "HOLD (FLAT)")
-
+            action = "HOLD (FLAT)"
         return {
             "Stock": stock,
             "Timestamp": ts,
@@ -203,6 +208,7 @@ class TradingAgent(ABC):
         # Original Stock price plot
         ax.plot(self.data.index,self.data[plot_index],label = 'Price')
 
+        # Buy prices
 
         # Buy and sell markers
         buy_signal = self.signal_data[stock][self.signal_data[stock]['Signal']==1]
