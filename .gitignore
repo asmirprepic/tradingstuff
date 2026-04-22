@@ -1,8 +1,48 @@
+# Virtual Environments
 venv_tf/
+venv/
+env/
+.venv/
+
+# Python Cache & Artifacts
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
+.editorconfig
+
+# Environment Variables
 .env
-*.csv
+.env.local
+
+# Project Outputs (generated, not to be committed)
+outputs/recommendations/*.csv
+outputs/backtest_results/*.json
+outputs/backtest_results/*.csv
+outputs/logs/
+plots/
+
+# Data Cache (can be re-generated from APIs)
+data/stock_data/
+
+# Ad-hoc Testing
 testing.py
 file_list.txt
+
+.env
+*.csv
+*.md
+create_dirs.py
+setup_structure.py
