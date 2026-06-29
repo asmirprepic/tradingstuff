@@ -1,9 +1,16 @@
 from abc import ABC, abstractmethod
 import numpy as np
 import pandas as pd
-from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.model_selection import train_test_split
 from agents.base_agents.trading_agent import TradingAgent
+
+try:
+    from tensorflow.keras.callbacks import EarlyStopping
+except ModuleNotFoundError as exc:
+    EarlyStopping = None
+    _TENSORFLOW_IMPORT_ERROR = exc
+else:
+    _TENSORFLOW_IMPORT_ERROR = None
 
 
 class SequentialNNAgent(TradingAgent, ABC):
@@ -33,6 +40,7 @@ class SequentialNNAgent(TradingAgent, ABC):
         Returns:
             - X: np.ndarray (samples, timesteps/features, channels)
             - y: np.ndarray or pd.Series (binary labels)
+            - optional index aligned to X/y
         """
         pass
 
@@ -43,11 +51,40 @@ class SequentialNNAgent(TradingAgent, ABC):
         """
         pass
 
-    def train_model(self, stock):
-        X, y = self.feature_engineering(stock)
+    def _require_tensorflow(self):
+        if EarlyStopping is None:
+            raise ModuleNotFoundError(
+                "tensorflow is required to train sequential neural-network agents. "
+                "Install tensorflow before using SequentialNNAgent subclasses."
+            ) from _TENSORFLOW_IMPORT_ERROR
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, shuffle=False, test_size=1 - self.split_ratio
+    def create_train_split_group(self, X, y, index, split_ratio=None, **kwargs):
+        kwargs.setdefault("shuffle", False)
+        if split_ratio is not None and "test_size" not in kwargs:
+            kwargs["test_size"] = 1 - split_ratio
+        return train_test_split(X, y, index, **kwargs)
+
+    def _resolve_feature_data(self, stock):
+        engineered = self.feature_engineering(stock)
+        if len(engineered) == 3:
+            X, y, index = engineered
+            index = pd.Index(index)
+        elif len(engineered) == 2:
+            X, y = engineered
+            source_index = self.data[stock].index
+            if len(X) > len(source_index):
+                raise ValueError(f"{stock}: feature rows exceed source index length.")
+            index = source_index[-len(X):]
+        else:
+            raise ValueError("feature_engineering must return (X, y) or (X, y, index).")
+        return X, y, pd.Index(index)
+
+    def train_model(self, stock):
+        self._require_tensorflow()
+        X, y, index = self._resolve_feature_data(stock)
+
+        X_train, X_test, y_train, y_test, index_train, index_test = self.create_train_split_group(
+            X, y, index, split_ratio=self.split_ratio
         )
 
         mu = X_train.mean(axis=0)
@@ -74,6 +111,8 @@ class SequentialNNAgent(TradingAgent, ABC):
             "X_test": X_test,
             "y_train": y_train,
             "y_test": y_test,
+            "index_train": pd.Index(index_train),
+            "index_test": pd.Index(index_test),
             "mu": mu,
             "sigma": sigma
         }
@@ -88,12 +127,12 @@ class SequentialNNAgent(TradingAgent, ABC):
 
         if mode == 'backtest':
             X_pred = data['X_test']
-            index_used = pd.date_range(end=self.data[stock].index[-1], periods=len(X_pred))
+            index_used = data['index_test']
 
         elif mode == 'live':
-            X_full, _ = self.feature_engineering(stock)
+            X_full, _, feature_index = self._resolve_feature_data(stock)
             X_pred = X_full[-1:].copy()
-            index_used = pd.Index([self.data[stock].index[-1]])
+            index_used = pd.Index([feature_index[-1]])
 
         else:
             raise ValueError("mode must be 'backtest' or 'live'")
@@ -105,6 +144,8 @@ class SequentialNNAgent(TradingAgent, ABC):
 
         signals = pd.DataFrame(index=index_used)
         signals['Prediction'] = predictions
+        signals["ProbUp"] = probs
+        signals["SignalStrength"] = probs
         signals['Position'] = predictions
         signals['Signal'] = 0
         signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
@@ -114,9 +155,11 @@ class SequentialNNAgent(TradingAgent, ABC):
         signals['return'] = np.log(close / close.shift(1))
         return signals
 
-    def walk_forward_predict(self, stock, initial_train_size=100, step_size=1):
-        X, y = self.feature_engineering(stock)
+    def walk_forward_predict(self, stock, initial_train_size=100, step_size=1, threshold=0.5):
+        self._require_tensorflow()
+        X, y, feature_index = self._resolve_feature_data(stock)
         predictions = []
+        probabilities = []
         indices = []
 
         for start in range(initial_train_size, len(X) - step_size + 1, step_size):
@@ -140,14 +183,17 @@ class SequentialNNAgent(TradingAgent, ABC):
             )
 
             prob = model.predict(X_test_norm, verbose=0).flatten()
-            pred = (prob > 0.5).astype(int)
+            pred = (prob > threshold).astype(int)
 
             predictions.extend(pred)
-            indices.extend(self.data[stock].index[start:start+step_size])
+            probabilities.extend(prob)
+            indices.extend(feature_index[start:start+step_size])
 
         # Assemble final signal DataFrame
         signals = pd.DataFrame(index=indices)
         signals['Prediction'] = predictions
+        signals["ProbUp"] = probabilities
+        signals["SignalStrength"] = probabilities
         signals['Position'] = predictions
         signals['Signal'] = 0
         signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1

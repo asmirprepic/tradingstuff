@@ -62,7 +62,7 @@ class TradingAgent(ABC):
         """
 
         algorithm_name = self.algorithm_name
-        signals = signals.dropna(subset=['return', 'Position'])
+        signals = signals.dropna(subset=['return', 'Position']).copy()
         signals['agent_returns'] = signals['return']*signals['Position'].shift(1)
         strategy_return = round(signals['agent_returns'].sum()*100,3)
         buy_and_hold_return = round(signals['return'].sum()*100,3)
