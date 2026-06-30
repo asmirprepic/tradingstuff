@@ -23,6 +23,7 @@ class SequentialNNAgent(TradingAgent, ABC):
     def __init__(self, data, split_ratio=0.8, batch_size=32, epochs=20, verbose=0):
         super().__init__(data)
         self.algorithm_name = "SequentialNN"
+        self.score_column = "SignalStrength"
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
         self.split_ratio = split_ratio
@@ -63,6 +64,38 @@ class SequentialNNAgent(TradingAgent, ABC):
         if split_ratio is not None and "test_size" not in kwargs:
             kwargs["test_size"] = 1 - split_ratio
         return train_test_split(X, y, index, **kwargs)
+
+    def build_sequence_dataset(self, features, target, sequence_length):
+        if sequence_length < 1:
+            raise ValueError("sequence_length must be at least 1.")
+        if not isinstance(features, pd.DataFrame):
+            raise TypeError("features must be a pandas DataFrame with an index.")
+        if not isinstance(target, pd.Series):
+            target = pd.Series(target, index=features.index)
+
+        aligned = features.copy()
+        aligned["_target"] = target.reindex(features.index)
+        aligned = aligned.dropna()
+
+        if len(aligned) < sequence_length:
+            raise ValueError(
+                f"Not enough rows ({len(aligned)}) to build sequences of length {sequence_length}."
+            )
+
+        values = aligned[features.columns].to_numpy(dtype=float)
+        targets = aligned["_target"].to_numpy(dtype=int)
+        indices = aligned.index
+
+        X = []
+        y = []
+        index = []
+        for end in range(sequence_length - 1, len(aligned)):
+            start = end - sequence_length + 1
+            X.append(values[start:end + 1])
+            y.append(targets[end])
+            index.append(indices[end])
+
+        return np.asarray(X, dtype=float), np.asarray(y, dtype=int), pd.Index(index)
 
     def _resolve_feature_data(self, stock):
         engineered = self.feature_engineering(stock)
@@ -222,6 +255,14 @@ class SequentialNNAgent(TradingAgent, ABC):
             self.signal_data[stock] = self.predict_signals(stock, mode=mode)
         self.calculate_returns()
 
-    @abstractmethod
-    def generate_signal_strategy(self, stock, *args, **kwargs):
-        pass
+    def generate_signal_strategy(self, stock, mode='backtest', **kwargs):
+        predict_kwargs = {}
+
+        for key in ("threshold",):
+            if key in kwargs:
+                predict_kwargs[key] = kwargs[key]
+
+        self.train_model(stock)
+        signals = self.predict_signals(stock, mode=mode, **predict_kwargs)
+        self.signal_data[stock] = signals
+        return signals

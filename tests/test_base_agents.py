@@ -5,7 +5,10 @@ import pandas as pd
 
 from agents.base_agents.nn_based_agent import NNBasedAgent
 from agents.base_agents.sequential_based import SequentialNNAgent
+from agents.ml_based.cnn_agent import CNNAgent
 from agents.ml_based.logistic_reg_agent import LRAgent
+from agents.ml_based.lstm_agent import LSTMAgent
+from agents.ml_based.transformer_agent import TransformerAgent
 
 
 def make_market_data(stock="AAA", periods=60):
@@ -61,6 +64,56 @@ class DummySequentialAgent(SequentialNNAgent):
 
     def generate_signal_strategy(self, stock, *args, **kwargs):
         raise NotImplementedError
+
+
+class ProbeLSTMAgent(LSTMAgent):
+    def __init__(self, data):
+        self.train_calls = []
+        self.predict_calls = []
+        super().__init__(data, sequence_length=3)
+
+    def train_model(self, stock):
+        self.train_calls.append(stock)
+
+    def predict_signals(self, stock, mode="backtest", threshold=0.5):
+        self.predict_calls.append((stock, mode, threshold))
+        index = self.data[stock].index[-3:]
+        return pd.DataFrame(
+            {
+                "Prediction": [0, 1, 1],
+                "ProbUp": [0.2, 0.8, 0.9],
+                "SignalStrength": [0.2, 0.8, 0.9],
+                "Position": [0, 1, 1],
+                "Signal": [0, 1, 0],
+                "return": [0.01, 0.02, -0.01],
+            },
+            index=index,
+        )
+
+
+class ProbeTransformerAgent(TransformerAgent):
+    def __init__(self, data):
+        self.train_calls = []
+        self.predict_calls = []
+        super().__init__(data, sequence_length=3)
+
+    def train_model(self, stock):
+        self.train_calls.append(stock)
+
+    def predict_signals(self, stock, mode="backtest", threshold=0.5):
+        self.predict_calls.append((stock, mode, threshold))
+        index = self.data[stock].index[-2:]
+        return pd.DataFrame(
+            {
+                "Prediction": [1, 0],
+                "ProbUp": [0.7, 0.3],
+                "SignalStrength": [0.7, 0.3],
+                "Position": [1, 0],
+                "Signal": [1, -1],
+                "return": [0.03, -0.02],
+            },
+            index=index,
+        )
 
 
 class BaseAgentsTests(unittest.TestCase):
@@ -125,6 +178,49 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertListEqual(signals.index.tolist(), test_index.tolist())
         self.assertListEqual(signals["Prediction"].tolist(), [0, 1, 1])
         self.assertIn("SignalStrength", signals.columns)
+
+    def test_sequence_agents_share_base_contract(self):
+        self.assertTrue(issubclass(CNNAgent, SequentialNNAgent))
+        self.assertTrue(issubclass(LSTMAgent, SequentialNNAgent))
+        self.assertTrue(issubclass(TransformerAgent, SequentialNNAgent))
+
+    def test_cnn_feature_engineering_returns_aligned_sequences(self):
+        data = make_market_data(periods=20)
+        agent = CNNAgent(data, sequence_length=4)
+
+        X, y, index = agent.feature_engineering("AAA")
+
+        self.assertEqual(X.ndim, 3)
+        self.assertEqual(X.shape[1], 4)
+        self.assertEqual(X.shape[2], 2)
+        self.assertEqual(len(X), len(y))
+        self.assertEqual(len(X), len(index))
+
+    def test_lstm_generate_signal_strategy_uses_shared_pipeline_without_ctor_training(self):
+        data = make_market_data(periods=12)
+        agent = ProbeLSTMAgent(data)
+
+        self.assertEqual(agent.train_calls, [])
+        self.assertEqual(agent.predict_calls, [])
+
+        signals = agent.generate_signal_strategy("AAA", mode="backtest", threshold=0.7)
+
+        self.assertEqual(agent.train_calls, ["AAA"])
+        self.assertEqual(agent.predict_calls, [("AAA", "backtest", 0.7)])
+        self.assertTrue(signals.equals(agent.signal_data["AAA"]))
+
+    def test_transformer_generate_signal_strategy_uses_shared_pipeline_without_ctor_training(self):
+        data = make_market_data(periods=12)
+        agent = ProbeTransformerAgent(data)
+
+        self.assertEqual(agent.train_calls, [])
+        self.assertEqual(agent.predict_calls, [])
+
+        signals = agent.generate_signal_strategy("AAA", mode="backtest", threshold=0.6)
+
+        self.assertEqual(agent.train_calls, ["AAA"])
+        self.assertEqual(agent.predict_calls, [("AAA", "backtest", 0.6)])
+        self.assertTrue(signals.equals(agent.signal_data["AAA"]))
 
 
 if __name__ == "__main__":
