@@ -12,6 +12,7 @@ from agents.ml_based.lstm_agent import LSTMAgent
 from agents.ml_based.transformer_agent import TransformerAgent
 from agents.technical.moving_average_agent import MovingAverageAgent
 from agents.technical.momentum_agent import MomentumAgent
+from agents.technical.performance_agent import PerformanceBasedAgent
 
 
 def make_market_data(stock="AAA", periods=60):
@@ -360,6 +361,35 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("AAA", agent.signal_data)
         self.assertIn("AAA", agent.returns_data)
         self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
+
+    def test_performance_agent_can_skip_constructor_generation(self):
+        data = make_market_data(periods=20)
+        agent = PerformanceBasedAgent(data, period_length=3, top_n=1, holding_period=4, auto_generate=False)
+
+        self.assertEqual(agent.signal_data, {})
+        self.assertEqual(agent.returns_data, {})
+
+    def test_performance_agent_run_all_populates_returns_and_portfolio_metrics(self):
+        data = make_market_data(periods=20)
+        agent = PerformanceBasedAgent(data, period_length=3, top_n=1, holding_period=4, auto_generate=False)
+
+        agent.run_all()
+
+        self.assertIn("AAA", agent.signal_data)
+        self.assertIn("AAA", agent.returns_data)
+        self.assertIn("LookbackReturn", agent.signal_data["AAA"].columns)
+        self.assertEqual(len(agent.portfolio_log_returns), len(data.index))
+        self.assertEqual(len(agent.selection_log), len(data.index))
+
+    def test_performance_agent_rebalances_from_first_valid_date(self):
+        data = make_market_data(periods=12)
+        agent = PerformanceBasedAgent(data, period_length=3, top_n=1, holding_period=4, auto_generate=False)
+
+        agent.run_all()
+
+        n_held = agent.holdings_matrix.sum(axis=1)
+        self.assertTrue((n_held.iloc[:3] == 0).all())
+        self.assertEqual(int(n_held.iloc[3]), 1)
 
 
 if __name__ == "__main__":
