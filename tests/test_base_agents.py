@@ -5,6 +5,7 @@ import pandas as pd
 
 from agents.base_agents.nn_based_agent import NNBasedAgent
 from agents.base_agents.sequential_based import SequentialNNAgent
+from agents.ml_based.autoencoder_agent import AutoencoderAgent
 from agents.ml_based.cnn_agent import CNNAgent
 from agents.ml_based.logistic_reg_agent import LRAgent
 from agents.ml_based.lstm_agent import LSTMAgent
@@ -116,6 +117,43 @@ class ProbeTransformerAgent(TransformerAgent):
         )
 
 
+class ProbeAutoencoderAgent(AutoencoderAgent):
+    def __init__(self, data):
+        self.train_calls = []
+        self.predict_calls = []
+        super().__init__(data, anomaly_threshold_percentile=90)
+
+    def train_model(self, stock, anomaly_threshold_percentile=None):
+        percentile = self.anomaly_threshold_percentile if anomaly_threshold_percentile is None else anomaly_threshold_percentile
+        self.train_calls.append((stock, percentile))
+        self.models[stock] = object()
+        self.scalers[stock] = object()
+        self.thresholds[stock] = 1.0
+        self.train_data[stock] = {
+            "X_train": pd.DataFrame(),
+            "X_test": pd.DataFrame(),
+            "index_train": pd.Index([]),
+            "index_test": pd.Index([]),
+            "percentile": percentile,
+        }
+        return 1.0
+
+    def predict_signals(self, stock, mode="backtest"):
+        self.predict_calls.append((stock, mode))
+        index = self.data[stock].index[-3:]
+        return pd.DataFrame(
+            {
+                "Anomaly": [False, True, True],
+                "ReconstructionError": [0.2, 1.2, 1.4],
+                "SignalStrength": [0.2, 1.2, 1.4],
+                "Position": [0, 1, 1],
+                "Signal": [0, 1, 0],
+                "return": [0.01, 0.03, -0.01],
+            },
+            index=index,
+        )
+
+
 class BaseAgentsTests(unittest.TestCase):
     def test_ml_agent_smoke_produces_returns(self):
         data = make_market_data(periods=80)
@@ -221,6 +259,39 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(agent.train_calls, ["AAA"])
         self.assertEqual(agent.predict_calls, [("AAA", "backtest", 0.6)])
         self.assertTrue(signals.equals(agent.signal_data["AAA"]))
+
+    def test_autoencoder_feature_engineering_returns_dataframe(self):
+        data = make_market_data(periods=12)
+        agent = AutoencoderAgent(data)
+
+        features = agent.feature_engineering("AAA")
+
+        self.assertIsInstance(features, pd.DataFrame)
+        self.assertListEqual(features.columns.tolist(), ["Open-Close", "High-Low"])
+        self.assertEqual(len(features), 12)
+
+    def test_autoencoder_generate_signal_strategy_uses_explicit_train_predict_flow(self):
+        data = make_market_data(periods=12)
+        agent = ProbeAutoencoderAgent(data)
+
+        self.assertEqual(agent.train_calls, [])
+        self.assertEqual(agent.predict_calls, [])
+
+        signals = agent.generate_signal_strategy("AAA", mode="backtest", anomaly_threshold_percentile=92)
+
+        self.assertEqual(agent.train_calls, [("AAA", 92)])
+        self.assertEqual(agent.predict_calls, [("AAA", "backtest")])
+        self.assertTrue(signals.equals(agent.signal_data["AAA"]))
+
+    def test_autoencoder_run_all_populates_returns(self):
+        data = make_market_data(periods=12)
+        agent = ProbeAutoencoderAgent(data)
+
+        agent.run_all(mode="backtest", anomaly_threshold_percentile=90)
+
+        self.assertIn("AAA", agent.signal_data)
+        self.assertIn("AAA", agent.returns_data)
+        self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
 
 
 if __name__ == "__main__":
