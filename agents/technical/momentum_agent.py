@@ -1,20 +1,25 @@
 from agents.base_agents.trading_agent import TradingAgent
-import pandas as pd
 import numpy as np
+import pandas as pd
+
 
 class MomentumAgent(TradingAgent):
     """
-    A trading agent that generates trading signals based on momentum indicators.
-
-    Args:
-        data (pd.DataFrame): A DataFrame containing the stock prices or relevant trading data.
-        back_length (int, optional): The number of periods to average returns for the momentum signal. Defaults to 1.
+    Momentum agent with optional multi-lookback ensemble scoring.
     """
 
-    def __init__(self, data, back_length=1, lookbacks=None, long_only: bool = False, score_mode: str = "z"):
+    def __init__(
+        self,
+        data,
+        back_length=1,
+        lookbacks=None,
+        long_only: bool = False,
+        score_mode: str = "z",
+        price_type: str = "Close",
+        auto_generate: bool = True,
+    ):
         super().__init__(data)
         self.algorithm_name = "Momentum"
-        # Used by TradingAgent.score_now() for ranking "today" recommendations.
         self.score_column = "SignalStrength"
 
         if lookbacks is None:
@@ -28,7 +33,7 @@ class MomentumAgent(TradingAgent):
             lookbacks = [1]
 
         self.lookbacks = sorted(set(lookbacks))
-        self.back_length = int(self.lookbacks[0])  # backward compatibility / single-window alias
+        self.back_length = int(self.lookbacks[0])
         self.long_only = bool(long_only)
 
         score_mode = str(score_mode).lower().strip()
@@ -36,69 +41,86 @@ class MomentumAgent(TradingAgent):
             raise ValueError("score_mode must be 'z' or 'raw'")
         self.score_mode = score_mode
 
-        self.price_type = 'Close'
+        self.price_type = price_type
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
+        if auto_generate:
+            self.run_all()
 
+    def _momentum_components(self, price, returns, lookback):
+        total_log_return = np.log(price / price.shift(lookback))
+        dailyized_momentum = total_log_return / float(lookback)
+        horizon_vol = returns.rolling(lookback).std(ddof=0) * np.sqrt(lookback)
+        horizon_vol = horizon_vol.replace(0, np.nan)
+        z_score = total_log_return / horizon_vol
+        return total_log_return, dailyized_momentum, z_score
 
-        # Handle multiple stocks
-        for stock in self.stocks_in_data:
-          self.generate_signal_strategy(stock)
+    def generate_signal_strategy(self, stock, mode="backtest"):
+        price = self.data[(stock, self.price_type)]
+        signals = pd.DataFrame(index=price.index)
+        signals["return"] = np.log(price / price.shift(1))
 
-        self.calculate_returns()
+        momentum_cols = []
+        raw_score_cols = []
+        z_score_cols = []
 
+        for lookback in self.lookbacks:
+            momentum_col = f"Momentum_{lookback}"
+            raw_score_col = f"MomentumDaily_{lookback}"
+            z_score_col = f"MomentumZ_{lookback}"
 
-    def generate_signal_strategy(self,stock):
-        """
-        Generates trading signals for the specified stock based on momentum indicators.
+            momentum, dailyized_momentum, z_score = self._momentum_components(
+                price,
+                signals["return"],
+                lookback,
+            )
 
-        Args:
-            stock (str): The stock symbol for which to generate signals.
-        """
+            signals[momentum_col] = momentum
+            signals[raw_score_col] = dailyized_momentum
+            signals[z_score_col] = z_score
 
-        signals = pd.DataFrame(index = self.data.index)
-        # Log return calculation
-        signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
-        price = self.data[(stock,'Close')]
-        mom_cols = []
-        z_cols = []
-        for lb in self.lookbacks:
-            mom_col = f"Momentum_{lb}"
-            z_col = f"MomentumZ_{lb}"
+            momentum_cols.append(momentum_col)
+            raw_score_cols.append(raw_score_col)
+            z_score_cols.append(z_score_col)
 
-            #mom = signals['return'].rolling(lb).mean()
-            mom = np.log(price / price.shift(lb))
-            vol = signals['return'].rolling(lb).std(ddof=0).replace(0, np.nan)
-            z = mom / vol
+        ensemble_valid = signals[momentum_cols + z_score_cols].notna().all(axis=1)
 
-            signals[mom_col] = mom
-            signals[z_col] = z
-            mom_cols.append(mom_col)
-            z_cols.append(z_col)
-
-        # Keep a stable 'Momentum' column for downstream code (use equal-weight ensemble mean)
-        if len(mom_cols) == 1:
-            signals['Momentum'] = signals[mom_cols[0]]
+        if len(momentum_cols) == 1:
+            momentum_ensemble = signals[momentum_cols[0]]
         else:
-            signals['Momentum'] = signals[mom_cols].mean(axis=1)
+            momentum_ensemble = signals[momentum_cols].mean(axis=1)
+        signals["Momentum"] = momentum_ensemble.where(ensemble_valid)
 
-        # SignalStrength is what you should sort/filter by for "today" recommendations
         if self.score_mode == "raw":
-            signals['SignalStrength'] = signals['Momentum']
+            if len(raw_score_cols) == 1:
+                strength = signals[raw_score_cols[0]]
+            else:
+                strength = signals[raw_score_cols].mean(axis=1)
         else:
-            signals['SignalStrength'] = signals[z_cols].mean(axis=1) if z_cols else signals['Momentum']
+            if len(z_score_cols) == 1:
+                strength = signals[z_score_cols[0]]
+            else:
+                strength = signals[z_score_cols].mean(axis=1)
+        signals["SignalStrength"] = strength.where(ensemble_valid)
 
-        # Position 1 for positive momentum, -1 for negative, 0 otherwise (or long-only clamp)
         if self.long_only:
-            signals['Position'] = np.where(signals['SignalStrength'] > 0, 1, 0)
+            position = np.where(signals["SignalStrength"] > 0, 1, 0)
         else:
-            signals['Position'] = np.where(signals['SignalStrength'] > 0, 1, np.where(signals['SignalStrength'] < 0, -1, 0))
-        # Signals change isn position buy /sell signals
-        signals['Signal'] = signals['Position'].diff().fillna(0).astype(int)
-        signals['Signal'] = signals['Signal'].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+            position = np.where(
+                signals["SignalStrength"] > 0,
+                1,
+                np.where(signals["SignalStrength"] < 0, -1, 0),
+            )
 
-        # Store the signals
+        signals["Position"] = np.where(ensemble_valid, position, 0).astype(int)
+        sig = signals["Position"].diff().fillna(0).astype(int)
+        signals["Signal"] = sig.apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+
         self.signal_data[stock] = signals
+        return signals
 
-
-
+    def run_all(self, mode="backtest"):
+        self.signal_data = {}
+        for stock in self.stocks_in_data:
+            self.generate_signal_strategy(stock, mode=mode)
+        self.calculate_returns()

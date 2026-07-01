@@ -10,6 +10,8 @@ from agents.ml_based.cnn_agent import CNNAgent
 from agents.ml_based.logistic_reg_agent import LRAgent
 from agents.ml_based.lstm_agent import LSTMAgent
 from agents.ml_based.transformer_agent import TransformerAgent
+from agents.technical.moving_average_agent import MovingAverageAgent
+from agents.technical.momentum_agent import MomentumAgent
 
 
 def make_market_data(stock="AAA", periods=60):
@@ -288,6 +290,72 @@ class BaseAgentsTests(unittest.TestCase):
         agent = ProbeAutoencoderAgent(data)
 
         agent.run_all(mode="backtest", anomaly_threshold_percentile=90)
+
+        self.assertIn("AAA", agent.signal_data)
+        self.assertIn("AAA", agent.returns_data)
+        self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
+
+    def test_momentum_agent_can_skip_constructor_generation(self):
+        data = make_market_data(periods=12)
+        agent = MomentumAgent(data, lookbacks=[2, 4], auto_generate=False)
+
+        self.assertEqual(agent.signal_data, {})
+        self.assertEqual(agent.returns_data, {})
+
+    def test_momentum_agent_requires_all_lookbacks_before_emitting_score(self):
+        data = make_market_data(periods=12)
+        agent = MomentumAgent(data, lookbacks=[2, 4], score_mode="z", auto_generate=False)
+
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertTrue(signals["SignalStrength"].iloc[:3].isna().all())
+        self.assertTrue(signals["Momentum"].iloc[:3].isna().all())
+        self.assertTrue((signals["Position"].iloc[:3] == 0).all())
+        self.assertTrue(signals["SignalStrength"].iloc[4:].notna().all())
+
+    def test_momentum_agent_run_all_populates_returns(self):
+        data = make_market_data(periods=20)
+        agent = MomentumAgent(data, lookbacks=[3, 5], score_mode="raw", auto_generate=False)
+
+        agent.run_all()
+
+        self.assertIn("AAA", agent.signal_data)
+        self.assertIn("AAA", agent.returns_data)
+        self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
+        self.assertIn("MomentumDaily_3", agent.signal_data["AAA"].columns)
+
+    def test_moving_average_agent_validates_windows(self):
+        data = make_market_data(periods=20)
+
+        with self.assertRaises(ValueError):
+            MovingAverageAgent(data, short_window=0, long_window=5, auto_generate=False)
+
+        with self.assertRaises(ValueError):
+            MovingAverageAgent(data, short_window=5, long_window=5, auto_generate=False)
+
+    def test_moving_average_agent_can_skip_constructor_generation(self):
+        data = make_market_data(periods=20)
+        agent = MovingAverageAgent(data, short_window=3, long_window=5, auto_generate=False)
+
+        self.assertEqual(agent.signal_data, {})
+        self.assertEqual(agent.returns_data, {})
+
+    def test_moving_average_agent_uses_explicit_warmup_gating(self):
+        data = make_market_data(periods=20)
+        agent = MovingAverageAgent(data, short_window=3, long_window=5, auto_generate=False)
+
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertTrue(signals["SignalStrength"].iloc[:4].isna().all())
+        self.assertTrue((signals["Position"].iloc[:4] == 0).all())
+        self.assertTrue(signals["Valid"].iloc[:4].eq(False).all())
+        self.assertTrue(signals["Valid"].iloc[4:].eq(True).all())
+
+    def test_moving_average_agent_run_all_populates_returns(self):
+        data = make_market_data(periods=20)
+        agent = MovingAverageAgent(data, short_window=3, long_window=5, auto_generate=False)
+
+        agent.run_all()
 
         self.assertIn("AAA", agent.signal_data)
         self.assertIn("AAA", agent.returns_data)

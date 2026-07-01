@@ -22,15 +22,18 @@ class MovingAverageAgent(TradingAgent):
         # Used by TradingAgent.score_now() for ranking "today" recommendations.
         self.score_column = "SignalStrength"
 
-        self.short_window = short_window
-        self.long_window = long_window
+        self.short_window = int(short_window)
+        self.long_window = int(long_window)
+        if self.short_window < 1 or self.long_window < 1:
+            raise ValueError("short_window and long_window must both be positive integers.")
+        if self.short_window >= self.long_window:
+            raise ValueError("short_window must be smaller than long_window for crossover logic.")
+
         self.price_type = price_type
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
         if auto_generate:
-            for stock in self.stocks_in_data:
-                self.generate_signal_strategy(stock)
-            self.calculate_returns()
+            self.run_all()
 
     def generate_signal_strategy(self, stock):
         """
@@ -43,11 +46,16 @@ class MovingAverageAgent(TradingAgent):
         close_price = self.data[(stock, self.price_type)]
         signals = pd.DataFrame(index=close_price.index)
         signals["price"] = close_price
-        signals["SMA_short"] = close_price.rolling(window=int(self.short_window)).mean()
-        signals["SMA_long"] = close_price.rolling(window=int(self.long_window)).mean()
+        signals["SMA_short"] = close_price.rolling(window=self.short_window).mean()
+        signals["SMA_long"] = close_price.rolling(window=self.long_window).mean()
+        signals["Valid"] = signals["SMA_short"].notna() & signals["SMA_long"].notna()
 
         # Position: long when short SMA above long SMA, else flat (long-only).
-        signals["Position"] = (signals["SMA_short"] > signals["SMA_long"]).astype(int)
+        signals["Position"] = np.where(
+            signals["Valid"] & (signals["SMA_short"] > signals["SMA_long"]),
+            1,
+            0,
+        ).astype(int)
 
         # Signal: discrete trade events derived from Position changes (-1/0/1).
         sig = signals["Position"].diff().fillna(0).astype(int)
@@ -57,12 +65,21 @@ class MovingAverageAgent(TradingAgent):
         signals["return"] = np.log(close_price / close_price.shift(1))
 
         # Strength score for ranking: normalized SMA spread.
-        signals["SignalStrength"] = (signals["SMA_short"] - signals["SMA_long"]) / signals["SMA_long"]
+        signals["SignalStrength"] = (
+            (signals["SMA_short"] - signals["SMA_long"]) / signals["SMA_long"]
+        ).where(signals["Valid"])
 
         signals["buy"] = (signals["Signal"] == 1)
         signals["sell"] = (signals["Signal"] == -1)
 
         self.signal_data[stock] = signals
+        return signals
+
+    def run_all(self, mode="backtest"):
+        self.signal_data = {}
+        for stock in self.stocks_in_data:
+            self.generate_signal_strategy(stock)
+        self.calculate_returns()
 
     def plot(self, stock):
         """
@@ -76,8 +93,8 @@ class MovingAverageAgent(TradingAgent):
         """
         fig, ax = super().plot(stock)
         close_price = self.data[(stock, self.price_type)]
-        sma_short = close_price.rolling(window=int(self.short_window)).mean()
-        sma_long = close_price.rolling(window=int(self.long_window)).mean()
+        sma_short = close_price.rolling(window=self.short_window).mean()
+        sma_long = close_price.rolling(window=self.long_window).mean()
 
         ax.plot(
             self.data.index,
