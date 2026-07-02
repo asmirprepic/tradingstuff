@@ -12,9 +12,12 @@ class NaiveBayesAgent(MLBasedAgent):
 
     def __init__(self, data):
         model = GaussianNB()
-        features = ['Open-Close', 'High-Low']
+        features = ["OC", "HL"]
         super().__init__(data, model=model, features=features)
-        self.algorithm_name = 'Naive_Bayes'
+        self.algorithm_name = "Naive_Bayes"
+
+    def feature_engineering(self, stock):
+        return self.default_feature_engineering(stock)
 
     def generate_signal_strategy(self, stock, mode='backtest'):
         logger.info(f"[{stock}] Running generate_signal_strategy in {mode} mode.")

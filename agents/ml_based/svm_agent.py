@@ -8,10 +8,10 @@ class SVMAgent(MLBasedAgent):
     """
 
     def __init__(self, data):
-        model = SVC()  # Default is fine; you can tune it later
-        features = ['Open-Close', 'High-Low']
+        model = SVC(probability=True)
+        features = ["OC", "HL"]
         super().__init__(data, model=model, features=features)
-        self.algorithm_name = 'SVM'
+        self.algorithm_name = "SVM"
 
     def feature_engineering(self, stock):
         """
@@ -27,5 +27,6 @@ class SVMAgent(MLBasedAgent):
         print(f"[{stock}] Running generate_signal_strategy in {mode} mode.")
 
         self.train_model(stock)
-        signals = self.predict_signals(stock)
+        signals = self.predict_signals(stock, mode=mode)
         self.signal_data[stock] = signals
+        return signals

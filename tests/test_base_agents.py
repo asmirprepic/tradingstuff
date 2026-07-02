@@ -7,9 +7,12 @@ from agents.base_agents.nn_based_agent import NNBasedAgent
 from agents.base_agents.sequential_based import SequentialNNAgent
 from agents.ml_based.autoencoder_agent import AutoencoderAgent
 from agents.ml_based.cnn_agent import CNNAgent
+from agents.ml_based.hmm_based_agent import HMMRegimeAgent
 from agents.ml_based.logistic_reg_agent import LRAgent
 from agents.ml_based.lstm_agent import LSTMAgent
+from agents.ml_based.naive_bayes_agent import NaiveBayesAgent
 from agents.ml_based.transformer_agent import TransformerAgent
+from agents.ml_based.svm_agent import SVMAgent
 from agents.technical.moving_average_agent import MovingAverageAgent
 from agents.technical.momentum_agent import MomentumAgent
 from agents.technical.performance_agent import PerformanceBasedAgent
@@ -157,6 +160,42 @@ class ProbeAutoencoderAgent(AutoencoderAgent):
         )
 
 
+class ProbeHMMRegimeAgent(HMMRegimeAgent):
+    def __init__(self, data):
+        self.train_calls = []
+        self.predict_calls = []
+        super().__init__(data, auto_generate=False)
+
+    def train_hmm(self, stock, split_ratio=None):
+        self.train_calls.append((stock, split_ratio))
+        self.hmm_models[stock] = object()
+        self.scalers[stock] = object()
+        self.best_regimes[stock] = 1
+        self.regime_return_maps[stock] = {0: -0.01, 1: 0.02}
+        self.train_data[stock] = {
+            "df_train": pd.DataFrame(),
+            "df_test": pd.DataFrame(),
+            "feature_cols": ["Return_1D", "Volatility", "Volume_Change"],
+            "index_train": pd.Index([]),
+            "index_test": pd.Index([]),
+        }
+
+    def predict_signals(self, stock, mode="backtest"):
+        self.predict_calls.append((stock, mode))
+        index = self.data[stock].index[-3:]
+        return pd.DataFrame(
+            {
+                "Regime": [0, 1, 1],
+                "Good_Regime": [0, 1, 1],
+                "SignalStrength": [0.3, 0.8, 0.9],
+                "Position": [0, 1, 1],
+                "Signal": [0, 1, 0],
+                "return": [0.01, 0.02, -0.01],
+            },
+            index=index,
+        )
+
+
 class BaseAgentsTests(unittest.TestCase):
     def test_ml_agent_smoke_produces_returns(self):
         data = make_market_data(periods=80)
@@ -291,6 +330,47 @@ class BaseAgentsTests(unittest.TestCase):
         agent = ProbeAutoencoderAgent(data)
 
         agent.run_all(mode="backtest", anomaly_threshold_percentile=90)
+
+        self.assertIn("AAA", agent.signal_data)
+        self.assertIn("AAA", agent.returns_data)
+        self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
+
+    def test_naive_bayes_agent_feature_contract_matches_base(self):
+        data = make_market_data(periods=20)
+        agent = NaiveBayesAgent(data)
+
+        X, y = agent.feature_engineering("AAA")
+
+        self.assertListEqual(X.columns.tolist(), ["OC", "HL"])
+        self.assertEqual(len(X), len(y))
+
+    def test_svm_agent_feature_contract_matches_base(self):
+        data = make_market_data(periods=20)
+        agent = SVMAgent(data)
+
+        X, y = agent.feature_engineering("AAA")
+
+        self.assertListEqual(X.columns.tolist(), ["OC", "HL"])
+        self.assertEqual(len(X), len(y))
+
+    def test_hmm_agent_uses_explicit_train_predict_flow(self):
+        data = make_market_data(periods=12)
+        agent = ProbeHMMRegimeAgent(data)
+
+        self.assertEqual(agent.train_calls, [])
+        self.assertEqual(agent.predict_calls, [])
+
+        signals = agent.generate_signal_strategy("AAA", mode="backtest")
+
+        self.assertEqual(agent.train_calls, [("AAA", None)])
+        self.assertEqual(agent.predict_calls, [("AAA", "backtest")])
+        self.assertTrue(signals.equals(agent.signal_data["AAA"]))
+
+    def test_hmm_agent_run_all_populates_returns(self):
+        data = make_market_data(periods=12)
+        agent = ProbeHMMRegimeAgent(data)
+
+        agent.run_all(mode="backtest")
 
         self.assertIn("AAA", agent.signal_data)
         self.assertIn("AAA", agent.returns_data)
