@@ -1,25 +1,66 @@
 """
 Curated exports for the currently stable `agents.ml_based` surface.
 
-Only agents in the "keep" bucket are re-exported here. Experimental and legacy
-files remain importable by direct path, but are intentionally excluded from the
-default package surface until they are refactored.
+Files are grouped by model type under subpackages such as `classical`,
+`deep_learning`, `anomaly`, `clustering`, `regime`, and
+`reinforcement_learning`.
 """
 
 from importlib import import_module
 
+ML_TYPE_FOLDERS = (
+    "anomaly",
+    "classical",
+    "clustering",
+    "deep_learning",
+    "regime",
+    "reinforcement_learning",
+)
+
+ML_TYPE_MODULES = {
+    "anomaly": (
+        "autoencoder_agent",
+        "lstm_anomaly_agent",
+        "variational_encoder_agent",
+    ),
+    "classical": (
+        "knn_agent",
+        "logistic_reg_agent",
+        "naive_bayes_agent",
+        "svm_agent",
+    ),
+    "clustering": ("clustering_agent",),
+    "deep_learning": (
+        "bayesian_nn",
+        "cnn_agent",
+        "lstm_agent",
+        "lstm_attention_agent",
+        "nn_classification_agent",
+        "nn_classification_aggregate",
+        "nn_classsification_aggregate",
+        "tcn_agent",
+        "transformer_agent",
+        "transformer_agent_test",
+    ),
+    "regime": ("hmm_based_agent",),
+    "reinforcement_learning": (
+        "deep_q_learning_agent",
+        "dqn_test",
+    ),
+}
+
 _KEEP_AGENT_SPECS = {
-    "AutoencoderAgent": ("agents.ml_based.autoencoder_agent", "AutoencoderAgent"),
-    "ClusteringFilteredKNNAgent": ("agents.ml_based.clustering_agent", "ClusteringFilteredKNNAgent"),
-    "CNNAgent": ("agents.ml_based.cnn_agent", "CNNAgent"),
-    "HMMRegimeAgent": ("agents.ml_based.hmm_based_agent", "HMMRegimeAgent"),
-    "KNNAgent": ("agents.ml_based.knn_agent", "KNNAgent"),
-    "LRAgent": ("agents.ml_based.logistic_reg_agent", "LRAgent"),
-    "LSTMAgent": ("agents.ml_based.lstm_agent", "LSTMAgent"),
-    "NaiveBayesAgent": ("agents.ml_based.naive_bayes_agent", "NaiveBayesAgent"),
-    "DenseNNAgent": ("agents.ml_based.nn_classification_agent", "DenseNNAgent"),
-    "SVMAgent": ("agents.ml_based.svm_agent", "SVMAgent"),
-    "TransformerAgent": ("agents.ml_based.transformer_agent", "TransformerAgent"),
+    "AutoencoderAgent": ("agents.ml_based.anomaly.autoencoder_agent", "AutoencoderAgent"),
+    "ClusteringFilteredKNNAgent": ("agents.ml_based.clustering.clustering_agent", "ClusteringFilteredKNNAgent"),
+    "CNNAgent": ("agents.ml_based.deep_learning.cnn_agent", "CNNAgent"),
+    "HMMRegimeAgent": ("agents.ml_based.regime.hmm_based_agent", "HMMRegimeAgent"),
+    "KNNAgent": ("agents.ml_based.classical.knn_agent", "KNNAgent"),
+    "LRAgent": ("agents.ml_based.classical.logistic_reg_agent", "LRAgent"),
+    "LSTMAgent": ("agents.ml_based.deep_learning.lstm_agent", "LSTMAgent"),
+    "NaiveBayesAgent": ("agents.ml_based.classical.naive_bayes_agent", "NaiveBayesAgent"),
+    "DenseNNAgent": ("agents.ml_based.deep_learning.nn_classification_agent", "DenseNNAgent"),
+    "SVMAgent": ("agents.ml_based.classical.svm_agent", "SVMAgent"),
+    "TransformerAgent": ("agents.ml_based.deep_learning.transformer_agent", "TransformerAgent"),
 }
 
 
@@ -42,20 +83,10 @@ globals().update(KEEP_AGENTS)
 
 REFACTOR_AGENTS = ()
 
-ARCHIVE_CANDIDATES = (
-    "BNNclassification",
-    "DeepQLearningAgent",
-    "LSTMAnomalyAgent",
-    "LSTMAttentionAgent",
-    "NNClassificationAgg",
-    "TCNAgent",
-    "TransformerTradingAgent",
-    "VAEAgent",
-)
-
 __all__ = tuple(KEEP_AGENTS.keys()) + (
+    "ML_TYPE_FOLDERS",
+    "ML_TYPE_MODULES",
     "KEEP_AGENTS",
     "UNAVAILABLE_KEEP_AGENTS",
     "REFACTOR_AGENTS",
-    "ARCHIVE_CANDIDATES",
 )

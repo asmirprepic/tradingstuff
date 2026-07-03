@@ -5,14 +5,14 @@ import pandas as pd
 
 from agents.base_agents.nn_based_agent import NNBasedAgent
 from agents.base_agents.sequential_based import SequentialNNAgent
-from agents.ml_based.autoencoder_agent import AutoencoderAgent
-from agents.ml_based.cnn_agent import CNNAgent
-from agents.ml_based.hmm_based_agent import HMMRegimeAgent
-from agents.ml_based.logistic_reg_agent import LRAgent
-from agents.ml_based.lstm_agent import LSTMAgent
-from agents.ml_based.naive_bayes_agent import NaiveBayesAgent
-from agents.ml_based.transformer_agent import TransformerAgent
-from agents.ml_based.svm_agent import SVMAgent
+from agents.ml_based.anomaly.autoencoder_agent import AutoencoderAgent
+from agents.ml_based.deep_learning.cnn_agent import CNNAgent
+from agents.ml_based.regime.hmm_based_agent import HMMRegimeAgent
+from agents.ml_based.classical.logistic_reg_agent import LRAgent
+from agents.ml_based.deep_learning.lstm_agent import LSTMAgent
+from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
+from agents.ml_based.deep_learning.transformer_agent import TransformerAgent
+from agents.ml_based.classical.svm_agent import SVMAgent
 from agents.technical.moving_average_agent import MovingAverageAgent
 from agents.technical.momentum_agent import MomentumAgent
 from agents.technical.performance_agent import PerformanceBasedAgent
