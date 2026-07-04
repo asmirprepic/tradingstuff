@@ -171,8 +171,8 @@ class AutoencoderAgent(TradingAgent):
         signals["Signal"] = 0
         signals.loc[signals["Position"] > signals["Position"].shift(1), "Signal"] = 1
         signals.loc[signals["Position"] < signals["Position"].shift(1), "Signal"] = -1
-        close = self.data[(stock, "Close")].reindex(index_used)
-        signals["return"] = np.log(close / close.shift(1))
+        close = self.data[(stock, "Close")]
+        signals["return"] = np.log(close / close.shift(1)).reindex(index_used)
         return signals
 
     def generate_signal_strategy(self, stock, mode="backtest", anomaly_threshold_percentile=None):
