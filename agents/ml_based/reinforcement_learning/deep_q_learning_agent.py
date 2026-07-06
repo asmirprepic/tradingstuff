@@ -1,129 +1,239 @@
-from agents.base_agents.trading_agent import TradingAgent
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense
+from sklearn.model_selection import train_test_split
+
+from agents.base_agents.trading_agent import TradingAgent
+
+try:
+    import tensorflow as tf
+    from tensorflow.keras.layers import Dense
+    from tensorflow.keras.models import Sequential
+except ModuleNotFoundError as exc:
+    tf = Dense = Sequential = None
+    _TENSORFLOW_IMPORT_ERROR = exc
+else:
+    _TENSORFLOW_IMPORT_ERROR = None
+
 
 class DeepQLearningAgent(TradingAgent):
     """
-    A trading agent that uses Deep Q-Learning to generate trading signals.
-    This agent employs a deep reinforcement learning algorithm to learn trading strategies
-    through trial and error interactions with the stock market environment.
+    Deep Q-learning style trading agent with a cleaned explicit lifecycle.
 
-    Attributes:
-        algorithm_name (str): Name of the algorithm, set to "DeepQLearning".
-        stocks_in_data (pd.Index): Unique stock symbols present in the data.
-        signal_data (dict): A dictionary to store signal data for each stock.
+    The agent learns a simple long-vs-flat policy per stock from engineered
+    features and next-bar log returns. The implementation is intentionally
+    lightweight so it fits the shared TradingAgent contract cleanly.
     """
 
-    def __init__(self, data, alpha=0.01, gamma=0.95, epsilon=1.0, epsilon_decay=0.995, epsilon_min=0.01, episodes=1000):
+    def __init__(
+        self,
+        data,
+        alpha=0.001,
+        gamma=0.95,
+        epsilon=1.0,
+        epsilon_decay=0.995,
+        epsilon_min=0.01,
+        episodes=100,
+        split_ratio=0.8,
+        hidden_units=24,
+        verbose=0,
+    ):
         super().__init__(data)
-        self.algorithm_name = 'DeepQLearning'
+        self.algorithm_name = "DeepQLearning"
+        self.score_column = "SignalStrength"
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
+
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
         self.epsilon_decay = epsilon_decay
         self.epsilon_min = epsilon_min
         self.episodes = episodes
-        self.model = self.build_model()
+        self.split_ratio = split_ratio
+        self.hidden_units = hidden_units
+        self.verbose = verbose
 
-        for stock in self.stocks_in_data:
-            self.generate_signal_strategy(stock)
-        self.calculate_returns()
+        self.models = {}
+        self.train_data = {}
 
-    def build_model(self):
-        """
-        Builds the Deep Q-Learning model.
+    def _require_tensorflow(self):
+        if Sequential is None:
+            raise ModuleNotFoundError(
+                "tensorflow is required to train DeepQLearningAgent. "
+                "Install tensorflow before using this agent."
+            ) from _TENSORFLOW_IMPORT_ERROR
 
-        Returns:
-            Sequential: The built neural network model.
-        """
-        model = Sequential()
-        model.add(Dense(24, input_dim=2, activation='relu'))
-        model.add(Dense(24, activation='relu'))
-        model.add(Dense(2, activation='linear'))
-        model.compile(loss='mse', optimizer=tf.keras.optimizers.Adam(lr=self.alpha))
+    def build_feature_frame(self, stock):
+        df = self.data[stock].copy()
+        df["Open-Close"] = df["Open"] - df["Close"]
+        df["High-Low"] = df["High"] - df["Low"]
+        return df.dropna(subset=["Open-Close", "High-Low", "Close"])
+
+    def feature_engineering(self, stock):
+        df = self.build_feature_frame(stock)
+        df["ForwardReturn"] = np.log(df["Close"].shift(-1) / df["Close"])
+        df = df.iloc[:-1].dropna(subset=["ForwardReturn"])
+        X = df[["Open-Close", "High-Low"]].copy()
+        rewards = df["ForwardReturn"].copy()
+        return X, rewards
+
+    def create_train_split_group(self, X, rewards, index, split_ratio=None, **kwargs):
+        kwargs.setdefault("shuffle", False)
+        if split_ratio is not None and "test_size" not in kwargs:
+            kwargs["test_size"] = 1 - split_ratio
+        return train_test_split(X, rewards, index, **kwargs)
+
+    def build_model(self, input_dim):
+        model = Sequential(
+            [
+                Dense(self.hidden_units, input_dim=input_dim, activation="relu"),
+                Dense(self.hidden_units, activation="relu"),
+                Dense(2, activation="linear"),
+            ]
+        )
+        model.compile(
+            loss="mean_squared_error",
+            optimizer=tf.keras.optimizers.Adam(learning_rate=self.alpha),
+        )
         return model
 
-    def create_classification_trading_condition(self, stock):
-        """
-        Creates the feature set for Deep Q-Learning. The features include 
-        'Open-Close' (difference between opening and closing prices) and 'High-Low' 
-        (difference between high and low prices).
+    def _predict_q_values(self, model, X):
+        return model.predict(X, verbose=0)
 
-        Args:
-            stock (str): The stock symbol for which to create features.
+    def train_model(self, stock):
+        self._require_tensorflow()
+        X, rewards = self.feature_engineering(stock)
 
-        Returns:
-            pd.DataFrame: The feature set.
-            pd.Series: The target variable, where 1 indicates an upward price movement 
-                        and -1 indicates a downward price movement.
-        """
-        data_copy = self.data[stock].copy()
-        data_copy['Open-Close'] = self.data[stock]['Open'] - self.data[stock]['Close']
-        data_copy['High-Low'] = self.data[stock]['High'] - self.data[stock]['Low']
-        data_copy.dropna(inplace=True)
+        if len(X) < 3:
+            raise ValueError(f"Not enough rows to train DeepQLearningAgent for {stock}.")
 
-        X = data_copy[['Open-Close', 'High-Low']].values
-        Y = np.where(self.data[stock]['Close'].shift(-1) > self.data[stock]['Close'], 1, -1)
-        Y_series = pd.Series(Y, index=self.data[stock].index)
-        Y = Y_series.loc[data_copy.index].values
+        X_train, X_test, rewards_train, rewards_test, index_train, index_test = self.create_train_split_group(
+            X,
+            rewards,
+            X.index,
+            split_ratio=self.split_ratio,
+        )
 
-        return X, Y
+        if len(X_train) < 2:
+            raise ValueError(f"Training split for {stock} is too small for Q-learning.")
 
-    def train_deep_q_learning(self, X, Y):
-        """
-        Trains a Deep Q-Learning agent on the provided data.
+        mu = X_train.mean()
+        sigma = X_train.std().replace(0, 1.0).fillna(1.0)
+        X_train_norm = ((X_train - mu) / sigma).to_numpy(dtype=float)
+        X_test_norm = ((X_test - mu) / sigma).to_numpy(dtype=float)
 
-        Args:
-            X (np.ndarray): The feature set.
-            Y (np.ndarray): The target variable.
-        """
-        for episode in range(self.episodes):
+        model = self.build_model(input_dim=X_train_norm.shape[1])
+        epsilon = float(self.epsilon)
+        reward_values = rewards_train.to_numpy(dtype=float)
+
+        for _ in range(self.episodes):
             state = 0
-            while state < len(X) - 1:
-                if np.random.rand() <= self.epsilon:
+            while state < len(X_train_norm) - 1:
+                if np.random.rand() <= epsilon:
                     action = np.random.randint(2)
                 else:
-                    action = np.argmax(self.model.predict(np.array([X[state]])))
+                    action = int(np.argmax(self._predict_q_values(model, X_train_norm[state:state + 1])[0]))
 
                 next_state = state + 1
-                reward = 1 if Y[state] == 1 and action == 1 else -1
-                target = reward + self.gamma * np.amax(self.model.predict(np.array([X[next_state]])))
-                target_f = self.model.predict(np.array([X[state]]))
-                target_f[0][action] = target
-                self.model.fit(np.array([X[state]]), target_f, epochs=1, verbose=0)
-                
+                reward = reward_values[state] if action == 1 else 0.0
+                next_q = self._predict_q_values(model, X_train_norm[next_state:next_state + 1])[0]
+                target = reward + self.gamma * float(np.max(next_q))
+                target_f = self._predict_q_values(model, X_train_norm[state:state + 1])
+                target_f[0, action] = target
+                model.fit(
+                    X_train_norm[state:state + 1],
+                    target_f,
+                    epochs=1,
+                    verbose=0,
+                )
                 state = next_state
 
-                if self.epsilon > self.epsilon_min:
-                    self.epsilon *= self.epsilon_decay
+            if epsilon > self.epsilon_min:
+                epsilon = max(self.epsilon_min, epsilon * self.epsilon_decay)
 
-    def generate_signal_strategy(self, stock):
-        """
-        Generates trading signals for the specified stock using the trained Deep Q-Learning model.
-        A signal is generated for each day based on the Q-values.
+        self.models[stock] = model
+        self.train_data[stock] = {
+            "X_train": X_train,
+            "X_test": X_test,
+            "rewards_train": rewards_train,
+            "rewards_test": rewards_test,
+            "index_train": pd.Index(index_train),
+            "index_test": pd.Index(index_test),
+            "mu": mu,
+            "sigma": sigma,
+            "epsilon_final": epsilon,
+            "X_train_norm": X_train_norm,
+            "X_test_norm": X_test_norm,
+        }
 
-        Args:
-            stock (str): The stock symbol for which to generate signals.
+    def predict_signals(self, stock, mode="backtest", threshold=0.0):
+        if stock not in self.models:
+            raise ValueError(f"Model for {stock} has not been trained.")
+        if stock not in self.train_data:
+            raise ValueError(f"Training data for {stock} is missing.")
 
-        The method updates the `signal_data` attribute with signals for the given stock.
-        """
-        signals = pd.DataFrame(index=self.data.index)
-        X, Y = self.create_classification_trading_condition(stock)
-        self.train_deep_q_learning(X, Y)
-        actions = [np.argmax(self.model.predict(np.array([x]))) for x in X]
+        model = self.models[stock]
+        train_data = self.train_data[stock]
+        mu = train_data["mu"]
+        sigma = train_data["sigma"]
 
-        signals['Prediction'] = actions
-        signals['Position'] = signals['Prediction'].apply(lambda x: 1 if x == 1 else 0)
-        
-        # Calculate Signal as the change in position
-        signals['Signal'] = 0
-        signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
-        signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
+        if mode == "backtest":
+            X_pred = train_data["X_test"]
+            index_used = train_data["index_test"]
+        elif mode == "live":
+            X_full = self.build_feature_frame(stock)[["Open-Close", "High-Low"]]
+            X_pred = X_full.iloc[[-1]]
+            index_used = pd.Index([X_full.index[-1]])
+        else:
+            raise ValueError("mode must be 'backtest' or 'live'")
 
-        signals['return'] = np.log(self.data[(stock, 'Close')] / self.data[(stock, 'Close')].shift(1))
-        
+        if len(X_pred) == 0:
+            return pd.DataFrame(
+                columns=[
+                    "Prediction",
+                    "FlatQ",
+                    "LongQ",
+                    "SignalStrength",
+                    "Position",
+                    "Signal",
+                    "return",
+                ]
+            )
+
+        X_pred_norm = ((X_pred - mu) / sigma).to_numpy(dtype=float)
+        q_values = self._predict_q_values(model, X_pred_norm)
+        flat_q = q_values[:, 0]
+        long_q = q_values[:, 1]
+        q_edge = long_q - flat_q
+        predictions = np.where(q_edge > threshold, 1, 0)
+
+        signals = pd.DataFrame(index=index_used)
+        signals["Prediction"] = predictions
+        signals["FlatQ"] = flat_q
+        signals["LongQ"] = long_q
+        signals["SignalStrength"] = q_edge
+        signals["Position"] = predictions.astype(int)
+        signals["Signal"] = 0
+        signals.loc[signals["Position"] > signals["Position"].shift(1), "Signal"] = 1
+        signals.loc[signals["Position"] < signals["Position"].shift(1), "Signal"] = -1
+
+        close = self.data[(stock, "Close")]
+        signals["return"] = np.log(close / close.shift(1)).reindex(index_used)
+        return signals
+
+    def generate_signal_strategy(self, stock, mode="backtest", threshold=0.0):
+        if stock not in self.models:
+            self.train_model(stock)
+
+        signals = self.predict_signals(stock, mode=mode, threshold=threshold)
         self.signal_data[stock] = signals
+        return signals
+
+    def run_all(self, mode="backtest", threshold=0.0):
+        self.signal_data = {}
+        for stock in self.stocks_in_data:
+            self.signal_data[stock] = self.generate_signal_strategy(
+                stock,
+                mode=mode,
+                threshold=threshold,
+            )
+        self.calculate_returns()
