@@ -31,6 +31,19 @@ def make_market_data(stock="AAA", periods=60):
     return data
 
 
+def make_geometric_market_data(stock="AAA", periods=12, daily_log_return=0.01):
+    index = pd.date_range("2024-01-01", periods=periods, freq="B")
+    close = 100 * np.exp(np.arange(periods) * daily_log_return)
+    columns = pd.MultiIndex.from_product([[stock], ["Open", "High", "Low", "Close", "Volume"]])
+    data = pd.DataFrame(index=index, columns=columns, dtype=float)
+    data[(stock, "Close")] = close
+    data[(stock, "Open")] = close + 0.5
+    data[(stock, "High")] = close + 1.0
+    data[(stock, "Low")] = close - 1.0
+    data[(stock, "Volume")] = np.arange(periods) + 1000
+    return data
+
+
 class DummyPredictModel:
     def __init__(self, probs):
         self._probs = np.asarray(probs, dtype=float)
@@ -383,6 +396,15 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(agent.signal_data, {})
         self.assertEqual(agent.returns_data, {})
 
+    def test_momentum_agent_validates_lookbacks(self):
+        data = make_market_data(periods=12)
+
+        with self.assertRaises(ValueError):
+            MomentumAgent(data, lookbacks=[0, 4], auto_generate=False)
+
+        with self.assertRaises(ValueError):
+            MomentumAgent(data, lookbacks=[], auto_generate=False)
+
     def test_momentum_agent_requires_all_lookbacks_before_emitting_score(self):
         data = make_market_data(periods=12)
         agent = MomentumAgent(data, lookbacks=[2, 4], score_mode="z", auto_generate=False)
@@ -404,6 +426,26 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("AAA", agent.returns_data)
         self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
         self.assertIn("MomentumDaily_3", agent.signal_data["AAA"].columns)
+
+    def test_momentum_agent_raw_mode_does_not_depend_on_z_score_availability(self):
+        data = make_geometric_market_data(periods=10)
+        agent = MomentumAgent(data, lookbacks=[2], score_mode="raw", auto_generate=False)
+
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertTrue(signals["MomentumZ_2"].iloc[3:].isna().all())
+        self.assertTrue(signals["SignalStrength"].iloc[2:].notna().all())
+        self.assertTrue((signals["Position"].iloc[2:] == 1).all())
+
+    def test_momentum_agent_z_score_suppresses_near_zero_volatility(self):
+        data = make_geometric_market_data(periods=10)
+        agent = MomentumAgent(data, lookbacks=[2], score_mode="z", auto_generate=False)
+
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertTrue(signals["Momentum"].iloc[2:].notna().all())
+        self.assertTrue(signals["SignalStrength"].iloc[2:].isna().all())
+        self.assertTrue((signals["Position"].iloc[2:] == 0).all())
 
     def test_moving_average_agent_validates_windows(self):
         data = make_market_data(periods=20)

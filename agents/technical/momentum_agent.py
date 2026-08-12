@@ -8,6 +8,8 @@ class MomentumAgent(TradingAgent):
     Momentum agent with optional multi-lookback ensemble scoring.
     """
 
+    VOL_EPSILON = 1e-12
+
     def __init__(
         self,
         data,
@@ -28,11 +30,25 @@ class MomentumAgent(TradingAgent):
             else:
                 lookbacks = [back_length]
 
-        lookbacks = [int(x) for x in lookbacks if int(x) > 0]
-        if not lookbacks:
-            lookbacks = [1]
+        if lookbacks is None:
+            raise ValueError("lookbacks could not be resolved from back_length")
 
-        self.lookbacks = sorted(set(lookbacks))
+        normalized_lookbacks = []
+        for lookback in lookbacks:
+            try:
+                normalized = int(lookback)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("lookbacks must contain positive integers") from exc
+
+            if normalized <= 0:
+                raise ValueError("lookbacks must contain positive integers")
+
+            normalized_lookbacks.append(normalized)
+
+        if not normalized_lookbacks:
+            raise ValueError("lookbacks must contain at least one positive integer")
+
+        self.lookbacks = sorted(set(normalized_lookbacks))
         self.back_length = int(self.lookbacks[0])
         self.long_only = bool(long_only)
 
@@ -51,7 +67,7 @@ class MomentumAgent(TradingAgent):
         total_log_return = np.log(price / price.shift(lookback))
         dailyized_momentum = total_log_return / float(lookback)
         horizon_vol = returns.rolling(lookback).std(ddof=0) * np.sqrt(lookback)
-        horizon_vol = horizon_vol.replace(0, np.nan)
+        horizon_vol = horizon_vol.where(horizon_vol > self.VOL_EPSILON, np.nan)
         z_score = total_log_return / horizon_vol
         return total_log_return, dailyized_momentum, z_score
 
@@ -83,25 +99,29 @@ class MomentumAgent(TradingAgent):
             raw_score_cols.append(raw_score_col)
             z_score_cols.append(z_score_col)
 
-        ensemble_valid = signals[momentum_cols + z_score_cols].notna().all(axis=1)
+        momentum_valid = signals[momentum_cols].notna().all(axis=1)
+        raw_valid = signals[raw_score_cols].notna().all(axis=1)
+        z_valid = signals[z_score_cols].notna().all(axis=1)
 
         if len(momentum_cols) == 1:
             momentum_ensemble = signals[momentum_cols[0]]
         else:
             momentum_ensemble = signals[momentum_cols].mean(axis=1)
-        signals["Momentum"] = momentum_ensemble.where(ensemble_valid)
+        signals["Momentum"] = momentum_ensemble.where(momentum_valid)
 
         if self.score_mode == "raw":
             if len(raw_score_cols) == 1:
                 strength = signals[raw_score_cols[0]]
             else:
                 strength = signals[raw_score_cols].mean(axis=1)
+            score_valid = raw_valid
         else:
             if len(z_score_cols) == 1:
                 strength = signals[z_score_cols[0]]
             else:
                 strength = signals[z_score_cols].mean(axis=1)
-        signals["SignalStrength"] = strength.where(ensemble_valid)
+            score_valid = z_valid
+        signals["SignalStrength"] = strength.where(score_valid)
 
         if self.long_only:
             position = np.where(signals["SignalStrength"] > 0, 1, 0)
@@ -112,7 +132,7 @@ class MomentumAgent(TradingAgent):
                 np.where(signals["SignalStrength"] < 0, -1, 0),
             )
 
-        signals["Position"] = np.where(ensemble_valid, position, 0).astype(int)
+        signals["Position"] = np.where(score_valid, position, 0).astype(int)
         sig = signals["Position"].diff().fillna(0).astype(int)
         signals["Signal"] = sig.apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
 
