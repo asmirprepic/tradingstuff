@@ -103,10 +103,10 @@ class MomentumAgent(TradingAgent):
         raw_valid = signals[raw_score_cols].notna().all(axis=1)
         z_valid = signals[z_score_cols].notna().all(axis=1)
 
-        if len(momentum_cols) == 1:
-            momentum_ensemble = signals[momentum_cols[0]]
+        if len(raw_score_cols) == 1:
+            momentum_ensemble = signals[raw_score_cols[0]]
         else:
-            momentum_ensemble = signals[momentum_cols].mean(axis=1)
+            momentum_ensemble = signals[raw_score_cols].mean(axis=1)
         signals["Momentum"] = momentum_ensemble.where(momentum_valid)
 
         if self.score_mode == "raw":

@@ -16,6 +16,7 @@ from agents.ml_based.classical.svm_agent import SVMAgent
 from agents.technical.moving_average_agent import MovingAverageAgent
 from agents.technical.momentum_agent import MomentumAgent
 from agents.technical.performance_agent import PerformanceBasedAgent
+from agents.technical.volume_price_divergence_agent import VolumePriceDivergenceAgent
 
 
 def make_market_data(stock="AAA", periods=60):
@@ -446,6 +447,37 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertTrue(signals["Momentum"].iloc[2:].notna().all())
         self.assertTrue(signals["SignalStrength"].iloc[2:].isna().all())
         self.assertTrue((signals["Position"].iloc[2:] == 0).all())
+
+    def test_momentum_agent_exports_dailyized_momentum(self):
+        data = make_geometric_market_data(periods=10, daily_log_return=0.02)
+        agent = MomentumAgent(data, lookbacks=[2], score_mode="z", auto_generate=False)
+
+        signals = agent.generate_signal_strategy("AAA")
+
+        expected = signals["MomentumDaily_2"]
+        pd.testing.assert_series_equal(signals["Momentum"], expected, check_names=False)
+
+    def test_volume_price_divergence_agent_maps_buy_and_sell_to_correct_positions(self):
+        index = pd.date_range("2024-01-01", periods=3, freq="B")
+        columns = pd.MultiIndex.from_product([["AAA"], ["Close", "Volume"]])
+
+        buy_data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        buy_data[("AAA", "Close")] = [100, 90, 80]
+        buy_data[("AAA", "Volume")] = [1000, 800, 700]
+
+        buy_agent = VolumePriceDivergenceAgent(buy_data, window=1, threshold=0.05)
+        buy_signals = buy_agent.signal_data["AAA"]
+        self.assertEqual(int(buy_signals["Position"].iloc[1]), 1)
+        self.assertEqual(buy_agent.action_now("AAA")["Action"], "HOLD (LONG)")
+
+        sell_data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        sell_data[("AAA", "Close")] = [100, 110, 120]
+        sell_data[("AAA", "Volume")] = [1000, 800, 700]
+
+        sell_agent = VolumePriceDivergenceAgent(sell_data, window=1, threshold=0.05)
+        sell_signals = sell_agent.signal_data["AAA"]
+        self.assertEqual(int(sell_signals["Position"].iloc[1]), -1)
+        self.assertEqual(sell_agent.action_now("AAA")["Action"], "HOLD (SHORT)")
 
     def test_moving_average_agent_validates_windows(self):
         data = make_market_data(periods=20)
