@@ -14,6 +14,7 @@ from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
 from agents.ml_based.deep_learning.transformer_agent import TransformerAgent
 from agents.ml_based.classical.svm_agent import SVMAgent
 from agents.technical.moving_average_agent import MovingAverageAgent
+from agents.technical.mean_reversion_agent import MeanReversionAgent
 from agents.technical.momentum_agent import MomentumAgent
 from agents.technical.performance_agent import PerformanceBasedAgent
 from agents.technical.volume_price_divergence_agent import VolumePriceDivergenceAgent
@@ -478,6 +479,20 @@ class BaseAgentsTests(unittest.TestCase):
         sell_signals = sell_agent.signal_data["AAA"]
         self.assertEqual(int(sell_signals["Position"].iloc[1]), -1)
         self.assertEqual(sell_agent.action_now("AAA")["Action"], "HOLD (SHORT)")
+
+    def test_mean_reversion_agent_signal_tracks_forward_filled_position(self):
+        index = pd.date_range("2024-01-01", periods=8, freq="B")
+        columns = pd.MultiIndex.from_product([["AAA"], ["Close"]])
+        data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        data[("AAA", "Close")] = [100, 100, 100, 90, 100, 100, 100, 100]
+
+        agent = MeanReversionAgent(data, lookback_period=3, threshold=1.0, auto_generate=False)
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertEqual(int(signals["Position"].iloc[3]), 1)
+        self.assertEqual(int(signals["Signal"].iloc[3]), 1)
+        self.assertEqual(int(signals["Position"].iloc[4]), 1)
+        self.assertEqual(int(signals["Signal"].iloc[4]), 0)
 
     def test_moving_average_agent_validates_windows(self):
         data = make_market_data(periods=20)

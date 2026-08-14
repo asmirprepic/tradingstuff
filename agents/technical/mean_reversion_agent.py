@@ -44,15 +44,18 @@ class MeanReversionAgent(TradingAgent):
       # Position: long if price is very low vs mean, short if very high, otherwise flat
       signals['Position'] = np.where(signals['z_score'] < -self.threshold, 1,
                                       np.where(signals['z_score'] > self.threshold, -1, 0))
-      signals['Signal'] = signals['Position'].diff().fillna(0).astype(int)
 
       # Forward-fill position to simulate holding
-      signals['Position'] = signals['Position'].replace(to_replace=0, method='ffill').fillna(0)
+      signals['Position'] = signals['Position'].replace(0, np.nan).ffill().fillna(0).astype(int)
+
+      # Signal reflects changes in the held position after fill-forward.
+      signals['Signal'] = signals['Position'].diff().fillna(0).astype(int)
 
       # Calculate returns
       signals['return'] = np.log(price / price.shift(1))
 
       self.signal_data[stock] = signals
+      return signals
 
   def plot(self, stock):
       """
