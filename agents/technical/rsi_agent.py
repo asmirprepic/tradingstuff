@@ -27,7 +27,7 @@ class RSIAgent(TradingAgent):
         signal_data (dict): A dictionary to store signal data for each stock.
     """
 
-  def __init__(self,data,period = 14,upper_band = 70,lower_band =30):
+  def __init__(self,data,period = 14,upper_band = 70,lower_band =30, auto_generate=True):
     super().__init__(data)
     self.algorithm_name='RSI'
     self.period = period
@@ -36,10 +36,11 @@ class RSIAgent(TradingAgent):
     self.price_type = 'Close'
     self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
-    for stock in self.stocks_in_data:
-      self.generate_signal_strategy(stock)
+    if auto_generate:
+      for stock in self.stocks_in_data:
+        self.generate_signal_strategy(stock)
 
-    self.calculate_returns()
+      self.calculate_returns()
 
   def generate_signal_strategy(self,stock):
     """
@@ -65,13 +66,10 @@ class RSIAgent(TradingAgent):
     signals['RSI'] = 100-(100/(1+rs))
 
     # Generate signals for long and short positions
-    signals['Position'] =np.nan
+    signals['Position'] = 0
     signals.loc[signals['RSI']<self.lower_band,'Position'] =1
     signals.loc[signals['RSI']>self.upper_band,'Position'] =-1
-
-
-    # Forward fill positions to maintain until explicitly changed
-    #signals['Position'] = signals['Position'].ffill()
+    signals['Position'] = signals['Position'].astype(int)
 
     # Ensure Signal is only -1, 0, or 1
     signals['Signal'] = 0
@@ -80,6 +78,7 @@ class RSIAgent(TradingAgent):
     signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
 
     self.signal_data[stock] = signals
+    return signals
 
 
 

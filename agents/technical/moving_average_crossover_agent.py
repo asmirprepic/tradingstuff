@@ -12,23 +12,20 @@ class MovingAverageCrossoverAgent(TradingAgent):
         long_window (int, optional): The number of periods for the long moving average. Defaults to 200.
     """
 
-    def __init__(self, data, short_window=50, long_window=200):
+    def __init__(self, data, short_window=50, long_window=200, auto_generate=True):
         super().__init__(data)
         self.algorithm_name = "MovingAverageCrossover"
-        self.short_window = short_window
-        self.long_window = long_window
+        self.short_window = int(short_window)
+        self.long_window = int(long_window)
+        if self.short_window < 1 or self.long_window < 1:
+            raise ValueError("short_window and long_window must both be positive integers.")
+        if self.short_window >= self.long_window:
+            raise ValueError("short_window must be smaller than long_window for crossover logic.")
         self.price_type = 'Close'
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
-        # Initialize signal_data dictionary to store signals for each stock
-        self.signal_data = {}
-
-        # Handle multiple stocks
-        for stock in self.stocks_in_data:
-            self.generate_signal_strategy(stock)
-        
-        # Assuming the base class handles return calculation, 
-        # so we don't call self.calculate_returns() here
+        if auto_generate:
+            self.run_all()
 
     def generate_signal_strategy(self, stock):
         """
@@ -43,6 +40,16 @@ class MovingAverageCrossoverAgent(TradingAgent):
         signals['Position'] = np.where(signals['Short_MA'] > signals['Long_MA'], 1, -1)
         signals['Signal'] = signals['Position'].diff().fillna(0).astype(int)
         signals['Signal'] = signals['Signal'].apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+        signals['return'] = np.log(
+            self.data[(stock, 'Close')] / self.data[(stock, 'Close')].shift(1)
+        )
 
         self.signal_data[stock] = signals
+        return signals
+
+    def run_all(self, mode="backtest"):
+        self.signal_data = {}
+        for stock in self.stocks_in_data:
+            self.generate_signal_strategy(stock)
+        self.calculate_returns()
 

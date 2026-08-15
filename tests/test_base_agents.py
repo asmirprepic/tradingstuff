@@ -14,9 +14,11 @@ from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
 from agents.ml_based.deep_learning.transformer_agent import TransformerAgent
 from agents.ml_based.classical.svm_agent import SVMAgent
 from agents.technical.moving_average_agent import MovingAverageAgent
+from agents.technical.moving_average_crossover_agent import MovingAverageCrossoverAgent
 from agents.technical.mean_reversion_agent import MeanReversionAgent
 from agents.technical.momentum_agent import MomentumAgent
 from agents.technical.performance_agent import PerformanceBasedAgent
+from agents.technical.rsi_agent import RSIAgent
 from agents.technical.volume_price_divergence_agent import VolumePriceDivergenceAgent
 
 
@@ -493,6 +495,35 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(int(signals["Signal"].iloc[3]), 1)
         self.assertEqual(int(signals["Position"].iloc[4]), 1)
         self.assertEqual(int(signals["Signal"].iloc[4]), 0)
+
+    def test_moving_average_crossover_agent_populates_returns(self):
+        data = make_market_data(periods=20)
+        agent = MovingAverageCrossoverAgent(data, short_window=3, long_window=5, auto_generate=False)
+
+        self.assertEqual(agent.signal_data, {})
+        self.assertEqual(agent.returns_data, {})
+
+        agent.run_all()
+
+        self.assertIn("AAA", agent.signal_data)
+        self.assertIn("AAA", agent.returns_data)
+        self.assertIn("return", agent.signal_data["AAA"].columns)
+
+    def test_rsi_agent_uses_flat_position_for_neutral_or_undefined_rsi(self):
+        index = pd.date_range("2024-01-01", periods=20, freq="B")
+        columns = pd.MultiIndex.from_product([["AAA"], ["Close"]])
+        data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        data[("AAA", "Close")] = [
+            100, 102, 104, 106, 108, 110, 108, 106, 104, 103,
+            103, 103, 103, 103, 103, 103, 103, 103, 103, 103,
+        ]
+
+        agent = RSIAgent(data, period=5, upper_band=70, lower_band=30, auto_generate=False)
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertFalse(signals["Position"].iloc[5:].isna().any())
+        self.assertEqual(int(signals["Position"].iloc[-1]), 0)
+        self.assertEqual(int(signals["Signal"].iloc[-1]), 0)
 
     def test_moving_average_agent_validates_windows(self):
         data = make_market_data(periods=20)
