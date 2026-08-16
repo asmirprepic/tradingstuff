@@ -20,6 +20,7 @@ from agents.technical.momentum_agent import MomentumAgent
 from agents.technical.performance_agent import PerformanceBasedAgent
 from agents.technical.rsi_agent import RSIAgent
 from agents.technical.volume_price_divergence_agent import VolumePriceDivergenceAgent
+from agents.technical.volume_weighted_average_price_agent import VWAPAgent
 
 
 def make_market_data(stock="AAA", periods=60):
@@ -524,6 +525,28 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertFalse(signals["Position"].iloc[5:].isna().any())
         self.assertEqual(int(signals["Position"].iloc[-1]), 0)
         self.assertEqual(int(signals["Signal"].iloc[-1]), 0)
+
+    def test_vwap_agent_can_skip_constructor_generation(self):
+        data = make_market_data(periods=20)
+        agent = VWAPAgent(data, period=3, threshold=0.05, auto_generate=False)
+
+        self.assertEqual(agent.signal_data, {})
+        self.assertEqual(agent.returns_data, {})
+
+    def test_vwap_agent_uses_symmetric_threshold_bands(self):
+        index = pd.date_range("2024-01-01", periods=3, freq="B")
+        columns = pd.MultiIndex.from_product([["AAA"], ["High", "Low", "Close", "Volume"]])
+        data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        data[("AAA", "High")] = [100, 100, 100]
+        data[("AAA", "Low")] = [100, 100, 100]
+        data[("AAA", "Close")] = [100, 96, 80]
+        data[("AAA", "Volume")] = [100, 100, 100]
+
+        agent = VWAPAgent(data, period=2, threshold=0.05, auto_generate=False)
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertEqual(int(signals["Position"].iloc[1]), 0)
+        self.assertEqual(int(signals["Position"].iloc[2]), -1)
 
     def test_moving_average_agent_validates_windows(self):
         data = make_market_data(periods=20)

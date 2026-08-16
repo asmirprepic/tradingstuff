@@ -25,16 +25,20 @@ class VWAPAgent(TradingAgent):
         signal_data (dict): A dictionary to store signal data for each stock.
     """
   
-  def __init__(self,data,period = 20, threshold =0.05):
+  def __init__(self,data,period = 20, threshold =0.05, auto_generate=True):
     super().__init__(data)
     self.algorithm_name = "VWAP"
     self.period = period
     self.threshold = threshold
-    stocks_in_data = self.data.columns.get_level_values(0).unique()
+    self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
-    for stock in stocks_in_data:
+    if auto_generate:
+      self.run_all()
+
+  def run_all(self, mode="backtest"):
+    self.signal_data = {}
+    for stock in self.stocks_in_data:
       self.generate_signal_strategy(stock)
-
     self.calculate_returns()
 
   def generate_signal_strategy(self,stock):
@@ -65,14 +69,14 @@ class VWAPAgent(TradingAgent):
     # Generate Signals
     signals['Position'] = np.nan
     signals.loc[price>signals['VWAP']*(1+self.threshold),'Position'] = 1
-    signals.loc[price<signals['VWAP']*(1+self.threshold),'Position'] = -1
+    signals.loc[price<signals['VWAP']*(1-self.threshold),'Position'] = -1
 
     # Neutral position when the price is near the VWAP
     signals.loc[(price <= signals['VWAP'] * (1 + self.threshold)) & 
                 (price >= signals['VWAP'] * (1 - self.threshold)), 'Position'] = 0
 
     #forward fill to make sure that once position is entered it is kept
-    signals['Position'] = signals['Position'].ffill().fillna(0)
+    signals['Position'] = signals['Position'].ffill().fillna(0).astype(int)
 
     #Ensure signal is only -1, 0 or 1
     signals['Signal']=0
@@ -81,6 +85,7 @@ class VWAPAgent(TradingAgent):
     signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
 
     self.signal_data[stock] = signals
+    return signals
 
 
 
