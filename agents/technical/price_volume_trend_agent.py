@@ -22,13 +22,18 @@ class PVTAgent(TradingAgent):
         price_type (str): Data type for price, set to 'Close'.
         signal_data (dict): A dictionary to store signal data for each stock.
   """
-  def __init__(self,data,threshold = 0.05):
+  def __init__(self,data,threshold = 0.05, auto_generate=True):
     super().__init__(data)
     self.algorithm_name ='PVT'
     self.threshold = threshold
-    stocks_in_data = self.data.columns.get_level_values(0).unique()
+    self.stocks_in_data = self.data.columns.get_level_values(0).unique()
     
-    for stock in stocks_in_data: 
+    if auto_generate:
+      self.run_all()
+
+  def run_all(self, mode="backtest"):
+    self.signal_data = {}
+    for stock in self.stocks_in_data: 
       self.generate_signal_strategy(stock)
     self.calculate_returns()
 
@@ -50,12 +55,13 @@ class PVTAgent(TradingAgent):
     # Calculate PVT
     signals['PVT'] = (volume*price.pct_change()).cumsum()
     signals['PVT_EMA'] = signals['PVT'].ewm(span=20).mean()
+    band = signals['PVT_EMA'].abs() * self.threshold
 
     #Generate signals for long and short positions
-    signals['Position'] = 0
-    signals.loc[signals['PVT']>signals['PVT_EMA']*(1+self.threshold),'Position'] = 1
-    signals.loc[signals['PVT']<signals['PVT_EMA']*(1-self.threshold),'Position'] = -1
-    signals['Position'].ffill()
+    signals['Position'] = np.nan
+    signals.loc[signals['PVT'] > signals['PVT_EMA'] + band,'Position'] = 1
+    signals.loc[signals['PVT'] < signals['PVT_EMA'] - band,'Position'] = -1
+    signals['Position'] = signals['Position'].ffill().fillna(0).astype(int)
 
     signals['Signal'] = 0
     signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
@@ -63,5 +69,6 @@ class PVTAgent(TradingAgent):
     signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
 
     self.signal_data[stock] = signals
+    return signals
 
 

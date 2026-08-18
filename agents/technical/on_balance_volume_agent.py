@@ -23,15 +23,19 @@ class OBVAgent(TradingAgent):
         price_type (str): Data type for price, set to 'Close'.
         signal_data (dict): A dictionary to store signal data for each stock.
     """
-  def __init__(self,data,threshold =0.05):
+  def __init__(self,data,threshold =0.05, auto_generate=True):
     super().__init__(data)
     self.threshold = threshold
     self.algorithm_name = "OBV"
     self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
+    if auto_generate:
+      self.run_all()
+
+  def run_all(self, mode="backtest"):
+    self.signal_data = {}
     for stock in self.stocks_in_data:
       self.generate_signal_strategy(stock)
-      
     self.calculate_returns()
 
 
@@ -50,20 +54,22 @@ class OBVAgent(TradingAgent):
     price = self.data[(stock,'Close')]
     volume = self.data[(stock,'Volume')]
 
-    # Calculate OBV
-    signals['OBV'] = (volume*(-price.diff().le(0)*2-1)).cumsum()
+    # Standard OBV: add volume on up days, subtract on down days, ignore flat closes.
+    direction = np.sign(price.diff()).fillna(0.0)
+    signals['OBV'] = (volume * direction).cumsum()
     signals['OBV_EMA'] = signals['OBV'].ewm(span =20).mean()
+    band = signals['OBV_EMA'].abs() * self.threshold
 
     # Generate signals
     signals['Position'] = np.nan
-    signals.loc[signals['OBV']>signals['OBV_EMA']*(1+self.threshold),'Position'] =1
-    signals.loc[signals['OBV']<signals['OBV_EMA']*(1-self.threshold),'Position'] =-1
+    signals.loc[signals['OBV'] > signals['OBV_EMA'] + band,'Position'] =1
+    signals.loc[signals['OBV'] < signals['OBV_EMA'] - band,'Position'] =-1
     
-    signals.loc[(signals['OBV'] <= signals['OBV_EMA'] * (1 + self.threshold)) & 
-                (signals['OBV'] >= signals['OBV_EMA'] * (1 - self.threshold)), 'Position'] = 0
+    signals.loc[(signals['OBV'] <= signals['OBV_EMA'] + band) & 
+                (signals['OBV'] >= signals['OBV_EMA'] - band), 'Position'] = 0
     
     #Forward fill the position
-    signals['Position'] = signals['Position'].ffill().fillna(0)
+    signals['Position'] = signals['Position'].ffill().fillna(0).astype(int)
 
     signals['Signal'] = 0
     signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
@@ -73,3 +79,4 @@ class OBVAgent(TradingAgent):
 
 
     self.signal_data[stock] = signals
+    return signals
