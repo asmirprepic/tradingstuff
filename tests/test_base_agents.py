@@ -621,6 +621,18 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(agent.signal_data, {})
         self.assertEqual(agent.returns_data, {})
 
+    def test_performance_agent_validates_top_n_against_stock_count(self):
+        data = pd.concat(
+            [
+                make_market_data(stock="AAA", periods=10),
+                make_market_data(stock="BBB", periods=10),
+            ],
+            axis=1,
+        )
+
+        with self.assertRaises(ValueError):
+            PerformanceBasedAgent(data, period_length=3, top_n=3, holding_period=4, auto_generate=False)
+
     def test_performance_agent_run_all_populates_returns_and_portfolio_metrics(self):
         data = make_market_data(periods=20)
         agent = PerformanceBasedAgent(data, period_length=3, top_n=1, holding_period=4, auto_generate=False)
@@ -642,6 +654,26 @@ class BaseAgentsTests(unittest.TestCase):
         n_held = agent.holdings_matrix.sum(axis=1)
         self.assertTrue((n_held.iloc[:3] == 0).all())
         self.assertEqual(int(n_held.iloc[3]), 1)
+
+    def test_performance_agent_uses_exact_equal_weight_portfolio_log_return(self):
+        index = pd.date_range("2024-01-01", periods=4, freq="B")
+        columns = pd.MultiIndex.from_product([["AAA", "BBB"], ["Close"]])
+        data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        data[("AAA", "Close")] = [100, 100, 200, 200]
+        data[("BBB", "Close")] = [100, 100, 100, 100]
+
+        agent = PerformanceBasedAgent(
+            data,
+            period_length=1,
+            top_n=2,
+            holding_period=2,
+            auto_generate=False,
+        )
+
+        agent.run_all()
+
+        self.assertAlmostEqual(agent.portfolio_log_returns.iloc[2], np.log1p(0.5), places=9)
+        self.assertAlmostEqual(agent.cumulative_returns.iloc[-1], np.log1p(0.5), places=9)
 
 
 if __name__ == "__main__":

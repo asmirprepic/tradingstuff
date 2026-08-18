@@ -34,6 +34,8 @@ class PerformanceBasedAgent(TradingAgent):
 
         self.price_type = price_type
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
+        if self.top_n > len(self.stocks_in_data):
+            raise ValueError("top_n cannot exceed the number of stocks in the dataset.")
         self.holdings_matrix = pd.DataFrame(index=self.data.index, columns=self.stocks_in_data, dtype=np.int8)
         self.selection_log = pd.DataFrame(index=self.data.index)
         self.portfolio_log_returns = pd.Series(dtype=float)
@@ -106,11 +108,13 @@ class PerformanceBasedAgent(TradingAgent):
 
         prices = self.data.xs(self.price_type, level=1, axis=1).copy()
         stock_logret = np.log(prices / prices.shift(1))
+        stock_simple_ret = np.exp(stock_logret) - 1.0
         hold = self.holdings_matrix.reindex(prices.index).fillna(0).astype(float)
         hold_lag = hold.shift(1).fillna(0)
 
         n_held = hold_lag.sum(axis=1).replace(0, np.nan)
-        port_logret = (stock_logret * hold_lag).sum(axis=1) / n_held
+        port_simple_ret = (stock_simple_ret * hold_lag).sum(axis=1) / n_held
+        port_logret = np.log1p(port_simple_ret)
         port_logret = port_logret.fillna(0.0)
 
         self.portfolio_log_returns = port_logret
@@ -152,7 +156,7 @@ class PerformanceBasedAgent(TradingAgent):
 
     def plot_returns(self):
         fig, ax = plt.subplots(figsize=(14, 7))
-        strategy_return = self.cumulative_returns.iloc[-1] * 100
+        strategy_return = (np.exp(self.cumulative_returns.iloc[-1]) - 1.0) * 100
         buy_and_hold_return = (
             (
                 self.data.xs(self.price_type, level=1, axis=1).iloc[-1]
