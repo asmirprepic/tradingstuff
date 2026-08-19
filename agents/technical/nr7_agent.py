@@ -12,12 +12,18 @@ class NR7BreakoutAgent(TradingAgent):
       - Hold for `hold_days` bars, then exit.
       - Next-bar execution: StrategyRet = Position.shift(1) * AssetRet.
     """
-    def __init__(self, data, hold_days=5, take_shorts=False):
+    def __init__(self, data, hold_days=5, take_shorts=False, auto_generate=True):
         super().__init__(data)
         self.algorithm_name = "NR7Breakout"
         self.hold_days = int(hold_days)
+        if self.hold_days < 1:
+            raise ValueError("hold_days must be a positive integer.")
         self.take_shorts = bool(take_shorts)
         self.signal_data = {}
+        self.stocks_in_data = self.data.columns.get_level_values(0).unique()
+
+        if auto_generate:
+            self.run_all()
 
     def _build_signals_for_stock(self, stock: str) -> pd.DataFrame:
         df = self.data[stock].copy()
@@ -64,6 +70,7 @@ class NR7BreakoutAgent(TradingAgent):
         return pd.DataFrame({
             'Position': pos,
             'Signal': signal,
+            'return': asset_ret,
             'AssetRet': asset_ret,
             'StrategyRet': strat_ret,
             'NR7_prev': nr7.astype(int)

@@ -13,10 +13,14 @@ from agents.ml_based.deep_learning.lstm_agent import LSTMAgent
 from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
 from agents.ml_based.deep_learning.transformer_agent import TransformerAgent
 from agents.ml_based.classical.svm_agent import SVMAgent
+from agents.technical.bollinger_bands_agent import BollingerBandsAgent
+from agents.technical.high_low import HighLowAgent
+from agents.technical.macd_agent import MACDAgent
 from agents.technical.moving_average_agent import MovingAverageAgent
 from agents.technical.moving_average_crossover_agent import MovingAverageCrossoverAgent
 from agents.technical.mean_reversion_agent import MeanReversionAgent
 from agents.technical.momentum_agent import MomentumAgent
+from agents.technical.nr7_agent import NR7BreakoutAgent
 from agents.technical.on_balance_volume_agent import OBVAgent
 from agents.technical.performance_agent import PerformanceBasedAgent
 from agents.technical.price_volume_trend_agent import PVTAgent
@@ -674,6 +678,61 @@ class BaseAgentsTests(unittest.TestCase):
 
         self.assertAlmostEqual(agent.portfolio_log_returns.iloc[2], np.log1p(0.5), places=9)
         self.assertAlmostEqual(agent.cumulative_returns.iloc[-1], np.log1p(0.5), places=9)
+
+    def test_nr7_agent_run_all_populates_return_contract(self):
+        data = make_market_data(periods=12)
+        agent = NR7BreakoutAgent(data, hold_days=3, auto_generate=False)
+
+        self.assertEqual(agent.signal_data, {})
+        self.assertEqual(agent.returns_data, {})
+
+        agent.run_all()
+
+        self.assertIn("AAA", agent.signal_data)
+        self.assertIn("AAA", agent.returns_data)
+        self.assertIn("return", agent.signal_data["AAA"].columns)
+
+    def test_high_low_agent_flips_on_opposite_breakout(self):
+        data = make_market_data(periods=55)
+        close = np.full(55, 100.0)
+        close[50] = 101.0
+        close[51:54] = 101.0
+        close[54] = 99.0
+        data[("AAA", "Close")] = close
+        data[("AAA", "Open")] = close
+        data[("AAA", "High")] = close + 1.0
+        data[("AAA", "Low")] = close - 1.0
+
+        agent = HighLowAgent(data, auto_generate=False)
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertEqual(int(signals["Position"].iloc[50]), 1)
+        self.assertEqual(int(signals["Signal"].iloc[50]), 1)
+        self.assertEqual(int(signals["Position"].iloc[54]), -1)
+        self.assertEqual(int(signals["Signal"].iloc[54]), -1)
+
+    def test_macd_agent_supports_skip_and_validates_windows(self):
+        data = make_market_data(periods=20)
+        agent = MACDAgent(data, short_window=3, long_window=5, signal_window=2, auto_generate=False)
+
+        self.assertEqual(agent.signal_data, {})
+        self.assertEqual(agent.returns_data, {})
+
+        with self.assertRaises(ValueError):
+            MACDAgent(data, short_window=5, long_window=5, signal_window=2, auto_generate=False)
+
+    def test_bollinger_agent_supports_skip_and_validation(self):
+        data = make_market_data(periods=20)
+        agent = BollingerBandsAgent(data, period=5, num_std_dev=2, auto_generate=False)
+
+        self.assertEqual(agent.signal_data, {})
+        self.assertEqual(agent.returns_data, {})
+
+        with self.assertRaises(ValueError):
+            BollingerBandsAgent(data, period=0, num_std_dev=2, auto_generate=False)
+
+        with self.assertRaises(ValueError):
+            BollingerBandsAgent(data, period=5, num_std_dev=0, auto_generate=False)
 
 
 if __name__ == "__main__":

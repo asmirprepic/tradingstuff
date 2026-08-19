@@ -26,16 +26,19 @@ class BollingerBandsAgent(TradingAgent):
       signal_data (dict): A dictionary to store signal data for each stock.
   """
 
-  def __init__(self, data, period=20, num_std_dev=2):
+  def __init__(self, data, period=20, num_std_dev=2, auto_generate=True):
       super().__init__(data)
       self.algorithm_name = "BollingerBands"
-      self.period = period
-      self.num_std_dev = num_std_dev
+      self.period = int(period)
+      self.num_std_dev = float(num_std_dev)
+      if self.period < 1:
+          raise ValueError("period must be a positive integer.")
+      if self.num_std_dev <= 0:
+          raise ValueError("num_std_dev must be positive.")
       self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
-      for stock in self.stocks_in_data:
-          self.generate_signal_strategy(stock)
-      self.calculate_returns()
+      if auto_generate:
+          self.run_all()
 
   def generate_signal_strategy(self, stock):
       """
@@ -66,7 +69,7 @@ class BollingerBandsAgent(TradingAgent):
       signals.loc[(close_price <= signals['upper_band']) & (close_price >= signals['lower_band']), 'Position'] = 0
 
       # Forward fill positions to maintain until explicitly changed
-      signals['Position'] = signals['Position'].ffill().fillna(0)
+      signals['Position'] = signals['Position'].ffill().fillna(0).astype(int)
 
       # Calculate signal as the change in position
       signals['Signal']=0
@@ -75,7 +78,13 @@ class BollingerBandsAgent(TradingAgent):
 
       signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
 
-
       self.signal_data[stock] = signals
+      return signals
+
+  def run_all(self, mode="backtest"):
+      self.signal_data = {}
+      for stock in self.stocks_in_data:
+          self.generate_signal_strategy(stock)
+      self.calculate_returns()
 
 

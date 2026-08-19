@@ -12,7 +12,7 @@ class HighLowAgent(TradingAgent):
       data (pd.DataFrame): A DataFrame containing the stock prices or relevant trading data.
   """
 
-  def __init__(self, data):
+  def __init__(self, data, auto_generate=True):
       super().__init__(data)
       self.algorithm_name = "HighLow"
       self.high_lookback = 50  # Look back for 50 points for highs
@@ -20,11 +20,8 @@ class HighLowAgent(TradingAgent):
 
       self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
-
-      for stock in self.stocks_in_data:
-          self.generate_signal_strategy(stock)
-
-      self.calculate_returns()
+      if auto_generate:
+          self.run_all()
 
   def generate_signal_strategy(self, stock):
       """
@@ -41,23 +38,21 @@ class HighLowAgent(TradingAgent):
       signals['rolling_max'] = price.rolling(window=self.high_lookback).max()
       signals['rolling_min'] = price.rolling(window=self.low_lookback).min()
 
-      # Initialize the 'Position' column to all 0s
-      signals['Position'] = 0
-
       # Determine buy and sell signals
       signals['buy_signal'] = signals['price'] > signals['rolling_max'].shift(1)
       signals['sell_signal'] = signals['price'] < signals['rolling_min'].shift(1)
-      signals['Position'] = 0
-      long_entry = (signals['Position'].shift(1) == 0) & signals['buy_signal']
-      short_entry = (signals['Position'].shift(1) == 0) & signals['sell_signal']
-      exit_signal = ((signals['Position'].shift(1) == 1) & signals['sell_signal']) | \
-              ((signals['Position'].shift(1) == -1) & signals['buy_signal'])
 
-      signals.loc[long_entry, 'Position'] = 1
-      signals.loc[short_entry, 'Position'] = -1
-      signals.loc[exit_signal, 'Position'] = 0
+      position = pd.Series(0, index=signals.index, dtype=int)
+      for i in range(1, len(signals)):
+          prev_pos = position.iloc[i - 1]
+          if bool(signals['buy_signal'].iloc[i]):
+              position.iloc[i] = 1
+          elif bool(signals['sell_signal'].iloc[i]):
+              position.iloc[i] = -1
+          else:
+              position.iloc[i] = prev_pos
 
-      signals['Position'] = signals['Position'].replace(0, np.nan).fillna(method='ffill').fillna(0)
+      signals['Position'] = position
 
       signals['Signal'] = signals['Position'].diff()
       signals['Signal'] = signals['Signal'].apply(lambda x: max(min(x, 1), -1))
@@ -68,6 +63,13 @@ class HighLowAgent(TradingAgent):
       signals['position'] = signals['Position']
 
       self.signal_data[stock] = signals
+      return signals
+
+  def run_all(self, mode="backtest"):
+      self.signal_data = {}
+      for stock in self.stocks_in_data:
+          self.generate_signal_strategy(stock)
+      self.calculate_returns()
 
   def plot(self, stock):
       fig, ax = super().plot(stock)

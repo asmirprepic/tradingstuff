@@ -24,18 +24,20 @@ class MACDAgent(TradingAgent):
         signal_data (dict): A dictionary to store signal data for each stock.
     """
 
-    def __init__(self, data, short_window=12, long_window=26, signal_window=9):
+    def __init__(self, data, short_window=12, long_window=26, signal_window=9, auto_generate=True):
         super().__init__(data)
         self.algorithm_name = "MACD"
-        self.short_window = short_window
-        self.long_window = long_window
-        self.signal_window = signal_window
+        self.short_window = int(short_window)
+        self.long_window = int(long_window)
+        self.signal_window = int(signal_window)
+        if self.short_window < 1 or self.long_window < 1 or self.signal_window < 1:
+            raise ValueError("short_window, long_window, and signal_window must be positive integers.")
+        if self.short_window >= self.long_window:
+            raise ValueError("short_window must be smaller than long_window for MACD.")
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
-
-        for stock in self.stocks_in_data:
-            self.generate_signal_strategy(stock)
-        self.calculate_returns()
+        if auto_generate:
+            self.run_all()
 
     def generate_signal_strategy(self, stock):
         """
@@ -72,5 +74,12 @@ class MACDAgent(TradingAgent):
         signals.loc[signals['Position']<signals['Position'].shift(1),'Signal'] = -1
 
         signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
-        
+
         self.signal_data[stock] = signals
+        return signals
+
+    def run_all(self, mode="backtest"):
+        self.signal_data = {}
+        for stock in self.stocks_in_data:
+            self.generate_signal_strategy(stock)
+        self.calculate_returns()
