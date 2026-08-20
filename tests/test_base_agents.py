@@ -25,6 +25,7 @@ from agents.technical.on_balance_volume_agent import OBVAgent
 from agents.technical.performance_agent import PerformanceBasedAgent
 from agents.technical.price_volume_trend_agent import PVTAgent
 from agents.technical.rsi_agent import RSIAgent
+from agents.technical.supertrend_agent import SupertrendAgent
 from agents.technical.volume_price_divergence_agent import VolumePriceDivergenceAgent
 from agents.technical.volume_weighted_average_price_agent import VWAPAgent
 
@@ -539,6 +540,15 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(agent.signal_data, {})
         self.assertEqual(agent.returns_data, {})
 
+    def test_vwap_agent_validates_parameters(self):
+        data = make_market_data(periods=20)
+
+        with self.assertRaises(ValueError):
+            VWAPAgent(data, period=0, threshold=0.05, auto_generate=False)
+
+        with self.assertRaises(ValueError):
+            VWAPAgent(data, period=3, threshold=0.0, auto_generate=False)
+
     def test_vwap_agent_uses_symmetric_threshold_bands(self):
         index = pd.date_range("2024-01-01", periods=3, freq="B")
         columns = pd.MultiIndex.from_product([["AAA"], ["High", "Low", "Close", "Volume"]])
@@ -553,6 +563,18 @@ class BaseAgentsTests(unittest.TestCase):
 
         self.assertEqual(int(signals["Position"].iloc[1]), 0)
         self.assertEqual(int(signals["Position"].iloc[2]), -1)
+
+    def test_vwap_agent_uses_warmup_gating_and_signal_strength(self):
+        data = make_market_data(periods=20)
+        agent = VWAPAgent(data, period=3, threshold=0.05, auto_generate=False)
+
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertTrue(signals["SignalStrength"].iloc[:2].isna().all())
+        self.assertTrue((signals["Position"].iloc[:2] == 0).all())
+        self.assertTrue(signals["Valid"].iloc[:2].eq(False).all())
+        self.assertTrue(signals["Valid"].iloc[2:].eq(True).all())
+        self.assertTrue(signals["SignalStrength"].iloc[2:].notna().all())
 
     def test_obv_agent_uses_standard_flat_close_obv(self):
         index = pd.date_range("2024-01-01", periods=4, freq="B")
@@ -733,6 +755,44 @@ class BaseAgentsTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             BollingerBandsAgent(data, period=5, num_std_dev=0, auto_generate=False)
+
+    def test_supertrend_agent_can_skip_constructor_generation(self):
+        data = make_market_data(periods=20)
+        agent = SupertrendAgent(data, period=3, multiplier=2.0, auto_generate=False)
+
+        self.assertEqual(agent.signal_data, {})
+        self.assertEqual(agent.returns_data, {})
+
+    def test_supertrend_agent_validates_parameters(self):
+        data = make_market_data(periods=20)
+
+        with self.assertRaises(ValueError):
+            SupertrendAgent(data, period=0, multiplier=2.0, auto_generate=False)
+
+        with self.assertRaises(ValueError):
+            SupertrendAgent(data, period=3, multiplier=0, auto_generate=False)
+
+    def test_supertrend_agent_uses_warmup_gating(self):
+        data = make_market_data(periods=20)
+        agent = SupertrendAgent(data, period=3, multiplier=2.0, auto_generate=False)
+
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertTrue(signals["SignalStrength"].iloc[:2].isna().all())
+        self.assertTrue((signals["Position"].iloc[:2] == 0).all())
+        self.assertTrue(signals["Valid"].iloc[:2].eq(False).all())
+        self.assertTrue(signals["Valid"].iloc[2:].eq(True).all())
+
+    def test_supertrend_agent_run_all_populates_returns(self):
+        data = make_market_data(periods=20)
+        agent = SupertrendAgent(data, period=3, multiplier=2.0, auto_generate=False)
+
+        agent.run_all()
+
+        self.assertIn("AAA", agent.signal_data)
+        self.assertIn("AAA", agent.returns_data)
+        self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
+        self.assertIn("Supertrend", agent.signal_data["AAA"].columns)
 
 
 if __name__ == "__main__":

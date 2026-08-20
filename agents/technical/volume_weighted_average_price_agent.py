@@ -28,8 +28,14 @@ class VWAPAgent(TradingAgent):
   def __init__(self,data,period = 20, threshold =0.05, auto_generate=True):
     super().__init__(data)
     self.algorithm_name = "VWAP"
-    self.period = period
-    self.threshold = threshold
+    self.score_column = "SignalStrength"
+    self.period = int(period)
+    self.threshold = float(threshold)
+    if self.period < 1:
+      raise ValueError("period must be a positive integer.")
+    if self.threshold <= 0:
+      raise ValueError("threshold must be positive.")
+    self.price_type = "Close"
     self.stocks_in_data = self.data.columns.get_level_values(0).unique()
 
     if auto_generate:
@@ -41,7 +47,7 @@ class VWAPAgent(TradingAgent):
       self.generate_signal_strategy(stock)
     self.calculate_returns()
 
-  def generate_signal_strategy(self,stock):
+  def generate_signal_strategy(self,stock, mode="backtest"):
     """
       Generates trading signals for the specified stock based on the VWAP indicator. 
       The agent enters a long position when the closing price is significantly above 
@@ -53,7 +59,7 @@ class VWAPAgent(TradingAgent):
       The method updates the `signal_data` attribute with signals for the given stock.
     """
     signals = pd.DataFrame(index = self.data.index)
-    price = self.data[(stock,'Close')]
+    price = self.data[(stock,self.price_type)]
     volume = self.data[(stock,'Volume')]
     high = self.data[(stock,'High')]
     low = self.data[(stock,'Low')]
@@ -65,24 +71,28 @@ class VWAPAgent(TradingAgent):
     signals['Cumulative_VP'] = signals['VP'].rolling(window = self.period).sum()
     signals['Cumulative_volume'] = volume.rolling(window = self.period).sum()
     signals['VWAP'] = signals['Cumulative_VP']/signals['Cumulative_volume']
+    signals['Valid'] = signals['VWAP'].notna()
 
     # Generate Signals
-    signals['Position'] = np.nan
-    signals.loc[price>signals['VWAP']*(1+self.threshold),'Position'] = 1
-    signals.loc[price<signals['VWAP']*(1-self.threshold),'Position'] = -1
+    signals['Position'] = 0
+    signals.loc[signals['Valid'] & (price > signals['VWAP'] * (1 + self.threshold)),'Position'] = 1
+    signals.loc[signals['Valid'] & (price < signals['VWAP'] * (1 - self.threshold)),'Position'] = -1
 
     # Neutral position when the price is near the VWAP
-    signals.loc[(price <= signals['VWAP'] * (1 + self.threshold)) & 
-                (price >= signals['VWAP'] * (1 - self.threshold)), 'Position'] = 0
-
-    #forward fill to make sure that once position is entered it is kept
-    signals['Position'] = signals['Position'].ffill().fillna(0).astype(int)
+    signals.loc[
+      signals['Valid']
+      & (price <= signals['VWAP'] * (1 + self.threshold))
+      & (price >= signals['VWAP'] * (1 - self.threshold)),
+      'Position'
+    ] = 0
+    signals['Position'] = signals['Position'].astype(int)
 
     #Ensure signal is only -1, 0 or 1
     signals['Signal']=0
     signals.loc[signals['Position']>signals['Position'].shift(1),'Signal'] = 1
     signals.loc[signals['Position']<signals['Position'].shift(1),'Signal'] = -1
-    signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
+    signals['return'] = np.log(price / price.shift(1))
+    signals['SignalStrength'] = ((price - signals['VWAP']) / signals['VWAP']).where(signals['Valid'])
 
     self.signal_data[stock] = signals
     return signals
