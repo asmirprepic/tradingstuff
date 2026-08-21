@@ -26,6 +26,30 @@ python -m scripts.get_tickers --region US --output my_tickers.txt
 - Single file with all unique tickers (one per line), deduplicated and sorted.
 - Or multiple files (one per market cap category) if `--by-market-cap` is used.
 
+### `run_technical_agents.py`
+
+Run one or many technical agents over the same dataset and compare which strategies
+look strongest on your chosen universe.
+
+**Usage:**
+
+```bash
+# Compare all technical agents on synthetic OHLCV data
+python -m scripts.run_technical_agents --use-synthetic --tickers AAPL,MSFT,NVDA
+
+# Compare a smaller set of agents on live data from the last 260 business days
+python -m scripts.run_technical_agents --agents momentum,supertrend,macd,vwap --tickers AAPL,MSFT,NVDA --lookback-days 260
+
+# Use tickers from file and keep only top 5 recommendations per agent
+python -m scripts.run_technical_agents --agents all --tickers-file tickers.txt --lookback-days 260 --top-n-per-agent 5
+```
+
+**Output:**
+
+- `technical_agent_summary.csv`: one row per agent with average returns, profitable-stock counts, and top pick.
+- `technical_agent_recommendations.csv`: combined recommendations for each agent/stock pair.
+- `technical_agent_consensus.csv`: grouped stock-level view showing buy/sell/hold counts across agents.
+
 ### `run_recommendations.py`
 
 Generate trading recommendations using MomentumAgent.
@@ -94,6 +118,16 @@ python -m scripts.run_recommendations --use_synthetic --tickers AAPL,MSFT --back
 - `--top_n`: Return only top N stocks by score
 - `--output`: Output CSV path (default: 'recommendations.csv')
 - `--use_synthetic`: Use synthetic data instead of Yahoo Finance
+
+### `run_technical_agents.py`
+
+- `--agents`: Comma-separated technical agents to run, or `all`
+- `--tickers`, `--tickers-file`, `--fetch-tickers`: Universe selection
+- `--start`, `--end`, `--lookback-days`, `--interval`: Data range
+- `--use-synthetic`, `--synthetic-periods`: Offline OHLCV testing
+- `--persistence`: Stable-position requirement in recommendations
+- `--top-n-per-agent`: Limit per-agent recommendation rows
+- `--summary-output`, `--recommendations-output`, `--consensus-output`: CSV output paths
 
 ## Requirements
 
