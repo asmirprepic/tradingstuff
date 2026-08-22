@@ -22,6 +22,12 @@ class MLBasedAgent(TradingAgent, ABC):
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
         self.feature_cache = {}
 
+    def _positions_from_predictions(self, predictions, index):
+        prediction_series = pd.Series(predictions, index=index, dtype="int64")
+        if prediction_series.dropna().isin([-1, 0, 1]).all():
+            return prediction_series
+        return (prediction_series == 1).astype(int)
+
     def default_feature_engineering(self, stock, force_refresh=False,timing = 'open'):
         cache_key = (stock, timing)
         if cache_key in self.feature_cache and not force_refresh:
@@ -166,7 +172,7 @@ class MLBasedAgent(TradingAgent, ABC):
             signals["ProbUp"] = prob_up
             # Standard "strength" for ranking (0..1). Agents can override score_column if desired.
             signals["SignalStrength"] = prob_up
-        signals['Position'] = (signals['Prediction'] == 1).astype(int)
+        signals['Position'] = self._positions_from_predictions(signals['Prediction'].to_numpy(), signals.index)
         signals['Signal'] = 0
         signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
         signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
@@ -225,7 +231,7 @@ class MLBasedAgent(TradingAgent, ABC):
         if prob_ups:
             signals["ProbUp"] = prob_ups
             signals["SignalStrength"] = signals["ProbUp"]
-        signals['Position'] = (signals['Prediction'] == 1).astype(int)
+        signals['Position'] = self._positions_from_predictions(signals['Prediction'].to_numpy(), signals.index)
         signals['Signal'] = 0
         signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
         signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1
@@ -285,7 +291,7 @@ class MLBasedAgent(TradingAgent, ABC):
     def _build_signals(self, predictions, index, stock):
         signals = pd.DataFrame(index=index)
         signals['Prediction'] = predictions
-        signals['Position'] = (signals['Prediction'] == 1).astype(int)
+        signals['Position'] = self._positions_from_predictions(signals['Prediction'].to_numpy(), signals.index)
         signals['Signal'] = 0
         signals.loc[signals['Position'] > signals['Position'].shift(1), 'Signal'] = 1
         signals.loc[signals['Position'] < signals['Position'].shift(1), 'Signal'] = -1

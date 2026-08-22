@@ -3,6 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
+from agents.base_agents.ml_trading_agent import MLBasedAgent
 from agents.base_agents.nn_based_agent import NNBasedAgent
 from agents.base_agents.sequential_based import SequentialNNAgent
 from agents.ml_based.anomaly.autoencoder_agent import AutoencoderAgent
@@ -62,6 +63,36 @@ class DummyPredictModel:
 
     def predict(self, X, verbose=0):
         return self._probs.reshape(-1, 1)
+
+
+class DummyProbClassifier:
+    def __init__(self, prob_up):
+        self._prob_up = np.asarray(prob_up, dtype=float)
+        self.classes_ = np.array([-1, 1])
+
+    def predict_proba(self, X):
+        prob_up = self._prob_up[: len(X)]
+        return np.column_stack([1.0 - prob_up, prob_up])
+
+
+class DummyMLAgent(MLBasedAgent):
+    def __init__(self, data):
+        super().__init__(data, model=None, features=["f1", "f2"])
+
+    def feature_engineering(self, stock):
+        df = self.data[stock].copy()
+        x = pd.DataFrame(
+            {
+                "f1": np.linspace(0.0, 1.0, len(df)),
+                "f2": np.linspace(1.0, 2.0, len(df)),
+            },
+            index=df.index,
+        )
+        y = pd.Series([1, -1, 1, -1, 1, -1][: len(df)], index=df.index)
+        return x, y
+
+    def generate_signal_strategy(self, stock, *args, **kwargs):
+        raise NotImplementedError
 
 
 class DummyNNAgent(NNBasedAgent):
@@ -232,6 +263,24 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("AAA", agent.returns_data)
         self.assertFalse(agent.signal_data["AAA"].empty)
         self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
+
+    def test_ml_predict_signals_preserves_short_positions_for_minus_one_labels(self):
+        data = make_market_data(periods=6)
+        stock = "AAA"
+        agent = DummyMLAgent(data)
+        x, y = agent.feature_engineering(stock)
+        x_train = x.iloc[:3]
+        x_test = x.iloc[3:]
+
+        agent.models[stock] = DummyProbClassifier([0.2, 0.8, 0.3])
+        agent.train_data[stock] = (x_train, x_test, y.iloc[:3], y.iloc[3:])
+
+        signals = agent.predict_signals(stock, mode="backtest", threshold=0.5)
+
+        self.assertListEqual(signals.index.tolist(), x_test.index.tolist())
+        self.assertListEqual(signals["Prediction"].tolist(), [-1, 1, -1])
+        self.assertListEqual(signals["Position"].tolist(), [-1, 1, -1])
+        self.assertListEqual(signals["Signal"].tolist(), [0, 1, -1])
 
     def test_nn_predict_signals_uses_training_stats_and_emits_score(self):
         data = make_market_data(periods=8)
