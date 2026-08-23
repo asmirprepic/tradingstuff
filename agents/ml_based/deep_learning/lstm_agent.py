@@ -21,16 +21,27 @@ class LSTMAgent(SequentialNNAgent):
         self.sequence_length = sequence_length
         self.lstm_units = lstm_units
 
-    def feature_engineering(self, stock):
+    def _build_feature_frame(self, stock):
         df = self.data[stock].copy()
         df["Open-Close"] = df["Open"] - df["Close"]
         df["High-Low"] = df["High"] - df["Low"]
-        df["Target"] = np.where(df["Close"].shift(-1) > df["Close"], 1, 0)
-        df = df.iloc[:-1].dropna(subset=["Open-Close", "High-Low"])
+        next_close = df["Close"].shift(-1)
+        df["Target"] = np.where(next_close.isna(), np.nan, np.where(next_close > df["Close"], 1, 0))
+        return df
+
+    def feature_engineering(self, stock):
+        df = self._build_feature_frame(stock).dropna(subset=["Open-Close", "High-Low", "Target"])
 
         features = df[["Open-Close", "High-Low"]]
-        target = df["Target"]
+        target = df["Target"].astype(int)
         return self.build_sequence_dataset(features, target, self.sequence_length)
+
+    def feature_engineering_live(self, stock):
+        df = self._build_feature_frame(stock).dropna(subset=["Open-Close", "High-Low"])
+        features = df[["Open-Close", "High-Low"]]
+        placeholder_target = pd.Series(0, index=features.index, dtype=int)
+        X, _, index = self.build_sequence_dataset(features, placeholder_target, self.sequence_length)
+        return X, index
 
     def build_model(self, input_shape):
         model = Sequential(

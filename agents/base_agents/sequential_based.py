@@ -112,6 +112,21 @@ class SequentialNNAgent(TradingAgent, ABC):
             raise ValueError("feature_engineering must return (X, y) or (X, y, index).")
         return X, y, pd.Index(index)
 
+    def _resolve_live_feature_data(self, stock):
+        if hasattr(self, "feature_engineering_live"):
+            engineered = self.feature_engineering_live(stock)
+            if len(engineered) == 2:
+                X, index = engineered
+            elif len(engineered) == 3:
+                X, _, index = engineered
+            else:
+                raise ValueError("feature_engineering_live must return (X, index) or (X, y, index).")
+            index = pd.Index(index)
+            return X[-1:].copy(), pd.Index([index[-1]])
+
+        X, _, index = self._resolve_feature_data(stock)
+        return X[-1:].copy(), pd.Index([index[-1]])
+
     def train_model(self, stock):
         self._require_tensorflow()
         X, y, index = self._resolve_feature_data(stock)
@@ -163,9 +178,7 @@ class SequentialNNAgent(TradingAgent, ABC):
             index_used = data['index_test']
 
         elif mode == 'live':
-            X_full, _, feature_index = self._resolve_feature_data(stock)
-            X_pred = X_full[-1:].copy()
-            index_used = pd.Index([feature_index[-1]])
+            X_pred, index_used = self._resolve_live_feature_data(stock)
 
         else:
             raise ValueError("mode must be 'backtest' or 'live'")

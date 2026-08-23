@@ -16,16 +16,27 @@ class CNNAgent(SequentialNNAgent):
         self.algorithm_name = "CNN"
         self.sequence_length = sequence_length
 
-    def feature_engineering(self, stock):
+    def _build_feature_frame(self, stock):
         df = self.data[stock].copy()
         df["Return"] = np.log(df["Close"] / df["Close"].shift(1))
         df["Volatility"] = df["Return"].rolling(window=5).std()
-        df["Target"] = np.where(df["Close"].shift(-1) > df["Close"], 1, 0)
-        df = df.iloc[:-1].dropna(subset=["Return", "Volatility"])
+        next_close = df["Close"].shift(-1)
+        df["Target"] = np.where(next_close.isna(), np.nan, np.where(next_close > df["Close"], 1, 0))
+        return df
+
+    def feature_engineering(self, stock):
+        df = self._build_feature_frame(stock).dropna(subset=["Return", "Volatility", "Target"])
 
         features = df[["Return", "Volatility"]]
-        target = df["Target"]
+        target = df["Target"].astype(int)
         return self.build_sequence_dataset(features, target, self.sequence_length)
+
+    def feature_engineering_live(self, stock):
+        df = self._build_feature_frame(stock).dropna(subset=["Return", "Volatility"])
+        features = df[["Return", "Volatility"]]
+        placeholder_target = pd.Series(0, index=features.index, dtype=int)
+        X, _, index = self.build_sequence_dataset(features, placeholder_target, self.sequence_length)
+        return X, index
 
     def build_model(self, input_shape):
         model = Sequential(

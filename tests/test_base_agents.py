@@ -154,6 +154,11 @@ class ProbeLSTMAgent(LSTMAgent):
         )
 
 
+class LiveIndexLSTMAgent(LSTMAgent):
+    def build_model(self, input_shape):
+        raise NotImplementedError
+
+
 class ProbeTransformerAgent(TransformerAgent):
     def __init__(self, data):
         self.train_calls = []
@@ -282,6 +287,22 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertListEqual(signals["Position"].tolist(), [-1, 1, -1])
         self.assertListEqual(signals["Signal"].tolist(), [0, 1, -1])
 
+    def test_ml_live_predict_signals_include_latest_feature_row(self):
+        data = make_market_data(periods=20)
+        stock = "AAA"
+        agent = LRAgent(data)
+        train_x, _ = agent.feature_engineering(stock)
+        live_x = agent.live_feature_engineering(stock)
+
+        self.assertEqual(train_x.index[-1], data[stock].index[-2])
+        self.assertEqual(live_x.index[-1], data[stock].index[-1])
+
+        agent.models[stock] = DummyProbClassifier(np.linspace(0.2, 0.8, len(live_x)))
+        signals = agent.predict_signals(stock, mode="live", threshold=0.5)
+
+        self.assertEqual(signals.index[-1], data[stock].index[-1])
+        self.assertEqual(len(signals), len(live_x))
+
     def test_nn_predict_signals_uses_training_stats_and_emits_score(self):
         data = make_market_data(periods=8)
         stock = "AAA"
@@ -362,6 +383,30 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(agent.train_calls, ["AAA"])
         self.assertEqual(agent.predict_calls, [("AAA", "backtest", 0.7)])
         self.assertTrue(signals.equals(agent.signal_data["AAA"]))
+
+    def test_sequential_live_predict_signals_include_latest_sequence_row(self):
+        data = make_market_data(periods=8)
+        stock = "AAA"
+        agent = LiveIndexLSTMAgent(data, sequence_length=3)
+
+        _, _, train_index = agent.feature_engineering(stock)
+        live_x, live_index = agent.feature_engineering_live(stock)
+
+        self.assertEqual(train_index[-1], data[stock].index[-2])
+        self.assertEqual(live_index[-1], data[stock].index[-1])
+
+        agent.models[stock] = DummyPredictModel([0.9])
+        agent.train_data[stock] = {
+            "mu": np.zeros((agent.sequence_length, live_x.shape[2]), dtype=float),
+            "sigma": np.ones((agent.sequence_length, live_x.shape[2]), dtype=float),
+            "X_test": live_x[-1:],
+            "index_test": pd.Index([live_index[-1]]),
+        }
+
+        signals = agent.predict_signals(stock, mode="live", threshold=0.5)
+
+        self.assertListEqual(signals.index.tolist(), [data[stock].index[-1]])
+        self.assertListEqual(signals["Prediction"].tolist(), [1])
 
     def test_transformer_generate_signal_strategy_uses_shared_pipeline_without_ctor_training(self):
         data = make_market_data(periods=12)

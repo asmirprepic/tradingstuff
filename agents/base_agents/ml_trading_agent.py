@@ -28,11 +28,7 @@ class MLBasedAgent(TradingAgent, ABC):
             return prediction_series
         return (prediction_series == 1).astype(int)
 
-    def default_feature_engineering(self, stock, force_refresh=False,timing = 'open'):
-        cache_key = (stock, timing)
-        if cache_key in self.feature_cache and not force_refresh:
-            return self.feature_cache[cache_key]
-
+    def _build_default_feature_frame(self, stock, timing='open'):
         df = self.data[stock].copy()
         required_cols = ['Open', 'Close', 'High', 'Low', 'Volume']
         if not all(col in df.columns for col in required_cols):
@@ -73,10 +69,16 @@ class MLBasedAgent(TradingAgent, ABC):
             raise ValueError(f"{stock}: missing features {missing_feats}")
 
         df[self.features] = df[self.features].replace([np.inf, -np.inf], np.nan).ffill()
+        next_close = df['Close'].shift(-1)
+        df['Target'] = np.where(next_close.isna(), np.nan, np.where(next_close > df['Close'], 1, -1))
+        return df
 
-        df['Target'] = np.where(df['Close'].shift(-1) > df['Close'], 1, -1)
-        df = df.iloc[:-1]
+    def default_feature_engineering(self, stock, force_refresh=False,timing = 'open'):
+        cache_key = (stock, timing, 'train')
+        if cache_key in self.feature_cache and not force_refresh:
+            return self.feature_cache[cache_key]
 
+        df = self._build_default_feature_frame(stock, timing=timing)
 
         valid_mask = df[self.features].notna().all(axis=1)
         df = df.loc[valid_mask]
@@ -87,6 +89,20 @@ class MLBasedAgent(TradingAgent, ABC):
         Y = df['Target'].copy()
         self.feature_cache[cache_key] = (X, Y)
         return X,Y
+
+    def default_live_features(self, stock, force_refresh=False, timing='open'):
+        cache_key = (stock, timing, 'live')
+        if cache_key in self.feature_cache and not force_refresh:
+            return self.feature_cache[cache_key]
+
+        df = self._build_default_feature_frame(stock, timing=timing)
+        valid_mask = df[self.features].notna().all(axis=1)
+        X = df.loc[valid_mask, self.features].copy()
+        self.feature_cache[cache_key] = X
+        return X
+
+    def live_feature_engineering(self, stock):
+        return self.default_live_features(stock, timing=getattr(self, "timing", "open"))
 
 
     @abstractmethod
@@ -133,7 +149,6 @@ class MLBasedAgent(TradingAgent, ABC):
             raise ValueError(f"Model for {stock} has not been trained.")
 
         model = self.models[stock]
-        X, _ = self.feature_engineering(stock)
 
         if mode == 'backtest':
             if stock not in self.train_data:
@@ -141,8 +156,8 @@ class MLBasedAgent(TradingAgent, ABC):
             X_pred = self.train_data[stock][1]
             index_used = X_pred.index
         elif mode == 'live':
-            X_pred = X
-            index_used = X.index
+            X_pred = self.live_feature_engineering(stock)
+            index_used = X_pred.index
         else:
             raise ValueError("mode must be 'backtest' or 'live'")
 
