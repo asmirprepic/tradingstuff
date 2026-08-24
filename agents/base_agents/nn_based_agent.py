@@ -64,6 +64,10 @@ class NNBasedAgent(TradingAgent, ABC):
             kwargs["test_size"] = 1 - split_ratio
         return train_test_split(X, y, **kwargs)
 
+    def live_feature_engineering(self, stock):
+        X, _, feature_cols = self.feature_engineering(stock)
+        return X[feature_cols]
+
     def train_model(self, stock):
         self._require_tensorflow()
         X, y, feature_cols = self.feature_engineering(stock)
@@ -109,12 +113,11 @@ class NNBasedAgent(TradingAgent, ABC):
         model = self.models[stock]
         train_data = self.train_data[stock]
         feature_cols = train_data["feature_cols"]
-        X_all, y_all, _ = self.feature_engineering(stock)
 
         if mode == 'backtest':
             X_pred = train_data["X_test"]
         elif mode == 'live':
-            X_pred = X_all[feature_cols]
+            X_pred = self.live_feature_engineering(stock)[feature_cols]
         else:
             raise ValueError("mode must be 'backtest' or 'live'")
 

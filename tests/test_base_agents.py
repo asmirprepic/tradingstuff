@@ -8,6 +8,7 @@ from agents.base_agents.nn_based_agent import NNBasedAgent
 from agents.base_agents.sequential_based import SequentialNNAgent
 from agents.ml_based.anomaly.autoencoder_agent import AutoencoderAgent
 from agents.ml_based.deep_learning.cnn_agent import CNNAgent
+from agents.ml_based.deep_learning.nn_classification_agent import DenseNNAgent
 from agents.ml_based.regime.hmm_based_agent import HMMRegimeAgent
 from agents.ml_based.classical.logistic_reg_agent import LRAgent
 from agents.ml_based.deep_learning.lstm_agent import LSTMAgent
@@ -328,6 +329,35 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertListEqual(signals["Prediction"].tolist(), [0, 1, 1])
         self.assertIn("SignalStrength", signals.columns)
         self.assertAlmostEqual(float(signals["SignalStrength"].iloc[1]), 0.8)
+
+    def test_dense_nn_feature_engineering_excludes_last_target_but_live_keeps_latest_row(self):
+        data = make_market_data(periods=8)
+        stock = "AAA"
+        agent = DenseNNAgent(data)
+
+        train_x, train_y, feature_cols = agent.feature_engineering(stock)
+        live_x = agent.live_feature_engineering(stock)
+
+        self.assertListEqual(feature_cols, ["Open-Close", "High-Low"])
+        self.assertEqual(train_x.index[-1], data[stock].index[-2])
+        self.assertEqual(train_y.index[-1], data[stock].index[-2])
+        self.assertEqual(live_x.index[-1], data[stock].index[-1])
+
+        agent.models[stock] = DummyPredictModel(np.linspace(0.2, 0.9, len(live_x)))
+        agent.train_data[stock] = {
+            "X_train": train_x.iloc[:4],
+            "X_test": train_x.iloc[4:],
+            "y_train": train_y.iloc[:4],
+            "y_test": train_y.iloc[4:],
+            "feature_cols": feature_cols,
+            "mu": train_x.iloc[:4].mean(),
+            "sigma": train_x.iloc[:4].std().replace(0, 1.0).fillna(1.0),
+        }
+
+        signals = agent.predict_signals(stock, mode="live", threshold=0.5)
+
+        self.assertEqual(signals.index[-1], data[stock].index[-1])
+        self.assertEqual(len(signals), len(live_x))
 
     def test_sequential_agent_preserves_actual_test_index(self):
         data = make_market_data(periods=10)
