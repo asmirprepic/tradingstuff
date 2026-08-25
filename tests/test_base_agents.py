@@ -13,6 +13,7 @@ from agents.ml_based.regime.hmm_based_agent import HMMRegimeAgent
 from agents.ml_based.classical.logistic_reg_agent import LRAgent
 from agents.ml_based.deep_learning.lstm_agent import LSTMAgent
 from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
+from agents.ml_based.deep_learning.tcn_agent import TCNAgent
 from agents.ml_based.deep_learning.transformer_agent import TransformerAgent
 from agents.ml_based.classical.svm_agent import SVMAgent
 from agents.technical.bollinger_bands_agent import BollingerBandsAgent
@@ -180,6 +181,31 @@ class ProbeTransformerAgent(TransformerAgent):
                 "Position": [1, 0],
                 "Signal": [1, -1],
                 "return": [0.03, -0.02],
+            },
+            index=index,
+        )
+
+
+class ProbeTCNAgent(TCNAgent):
+    def __init__(self, data):
+        self.train_calls = []
+        self.predict_calls = []
+        super().__init__(data, sequence_length=3)
+
+    def train_model(self, stock):
+        self.train_calls.append(stock)
+
+    def predict_signals(self, stock, mode="backtest", threshold=0.5):
+        self.predict_calls.append((stock, mode, threshold))
+        index = self.data[stock].index[-2:]
+        return pd.DataFrame(
+            {
+                "Prediction": [1, 0],
+                "ProbUp": [0.75, 0.25],
+                "SignalStrength": [0.75, 0.25],
+                "Position": [1, 0],
+                "Signal": [1, -1],
+                "return": [0.02, -0.01],
             },
             index=index,
         )
@@ -387,6 +413,7 @@ class BaseAgentsTests(unittest.TestCase):
     def test_sequence_agents_share_base_contract(self):
         self.assertTrue(issubclass(CNNAgent, SequentialNNAgent))
         self.assertTrue(issubclass(LSTMAgent, SequentialNNAgent))
+        self.assertTrue(issubclass(TCNAgent, SequentialNNAgent))
         self.assertTrue(issubclass(TransformerAgent, SequentialNNAgent))
 
     def test_cnn_feature_engineering_returns_aligned_sequences(self):
@@ -401,6 +428,18 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(len(X), len(y))
         self.assertEqual(len(X), len(index))
 
+    def test_tcn_feature_engineering_returns_aligned_sequences(self):
+        data = make_market_data(periods=80)
+        agent = TCNAgent(data, sequence_length=4)
+
+        X, y, index = agent.feature_engineering("AAA")
+
+        self.assertEqual(X.ndim, 3)
+        self.assertEqual(X.shape[1], 4)
+        self.assertEqual(X.shape[2], 7)
+        self.assertEqual(len(X), len(y))
+        self.assertEqual(len(X), len(index))
+
     def test_lstm_generate_signal_strategy_uses_shared_pipeline_without_ctor_training(self):
         data = make_market_data(periods=12)
         agent = ProbeLSTMAgent(data)
@@ -412,6 +451,19 @@ class BaseAgentsTests(unittest.TestCase):
 
         self.assertEqual(agent.train_calls, ["AAA"])
         self.assertEqual(agent.predict_calls, [("AAA", "backtest", 0.7)])
+        self.assertTrue(signals.equals(agent.signal_data["AAA"]))
+
+    def test_tcn_generate_signal_strategy_uses_shared_pipeline_without_ctor_training(self):
+        data = make_market_data(periods=12)
+        agent = ProbeTCNAgent(data)
+
+        self.assertEqual(agent.train_calls, [])
+        self.assertEqual(agent.predict_calls, [])
+
+        signals = agent.generate_signal_strategy("AAA", mode="backtest", threshold=0.65)
+
+        self.assertEqual(agent.train_calls, ["AAA"])
+        self.assertEqual(agent.predict_calls, [("AAA", "backtest", 0.65)])
         self.assertTrue(signals.equals(agent.signal_data["AAA"]))
 
     def test_sequential_live_predict_signals_include_latest_sequence_row(self):

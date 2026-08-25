@@ -1,114 +1,119 @@
-
-import pandas as pd
 import numpy as np
-import tensorflow as tf
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Conv1D, BatchNormalization, ReLU, Flatten
-from tensorflow.keras.layers import Input, Add
-from tensorflow.keras.models import Model
-from sklearn.preprocessing import MinMaxScaler
-from agents.base_agents.trading_agent import TradingAgent
+import pandas as pd
 
-class TCNAgent(TradingAgent):
-    """ A trading agent that uses a Temporcal Convolutional Network to generate trading signals"""
-    
-    def __init__(self,data,look_back = 50,kernel_size = 3, filters = 32,num_layers = 1):
-        super.__init__(data)
-        self.algorithm_name= 'TCN'
-        self.look_back = look_back
+from agents.base_agents.sequential_based import SequentialNNAgent
+
+try:
+    import tensorflow as tf
+    from tensorflow.keras import layers
+except ModuleNotFoundError:
+    tf = None
+    layers = None
+
+
+class TCNAgent(SequentialNNAgent):
+    """
+    Temporal Convolutional Network trading agent built on the shared sequential pipeline.
+    """
+
+    def __init__(
+        self,
+        data,
+        sequence_length=20,
+        kernel_size=3,
+        filters=32,
+        num_layers=2,
+        dense_units=32,
+        dropout=0.1,
+        epochs=20,
+        batch_size=32,
+        verbose=0,
+    ):
+        super().__init__(data, epochs=epochs, batch_size=batch_size, verbose=verbose)
+        self.algorithm_name = "TCN"
+        self.sequence_length = sequence_length
         self.kernel_size = kernel_size
         self.filters = filters
         self.num_layers = num_layers
-        self.scaler = MinMaxScaler(feature_range=(0,1))
-        self.stocks_in_data = self.data.columns.get_level_values(0).unqiue()
+        self.dense_units = dense_units
+        self.dropout = dropout
 
-        for stock in self.stocks_in_data:
-            self.generate_signal_strategy(stock)
-        self.calculate_returns(stock)
-
-    def create_classification_trading_condition(self,stock):
-        data_copy = self.data[stock].copy()
-
-        #Features
-        data_copy['Open-Close'] = data_copy['Open']-data_copy['Close']
-        data_copy['High-Low'] = data_copy['High'] - data_copy['Low']
-        data_copy['SMA-10'] = data_copy['Close'].rolling(window = 10).mean()
-        data_copy['SMA-50'] = data_copy['Close'].rolling(windiw = 50).mean()
-        data_copy['Momentum'] = data_copy['Close']-data_copy['Close'].shift(10)
-        data_copy['RSI'] = self.calculate_rsi(data_copy['Close'])
-
-        # Forward fill data
-        data_copy.ffill()
-
-        # Features and target
-        X= data_copy[['Open-Close','High-Low','SMA-10','SMA-50','Momentum','RSI','Volume']]
-        Y = np.where(data_copy['Close'].shift(-1)>data_copy['Close'],1,-1)
-        Y_series = pd.Series(Y,index = data_copy.index)
-        Y = Y_series.loc[X.index]
-
-        # Scaling
-        X_scaled = self.scaler.fit_transform(X)
-
-        # Preparing data for TCN
-        X_tcn,Y_tcn = [],[]
-        for i in range(self.look_back,len(X_scaled)):
-            X_tcn.append(X_scaled[i-self.look_back:i])
-            Y_tcn.append(Y.values[i])
-        
-        return np.array(X_tcn),np.array(Y_tcn)
-    
-    def calculate_rsi(self,series,period = 14):
+    def _calculate_rsi(self, series, period=14):
         delta = series.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window = period).mean()
-        loss = (-delta.where(delta < 0 , 0)).rolling(window = period).mean()
+        gain = delta.clip(lower=0).rolling(window=period).mean()
+        loss = (-delta.clip(upper=0)).rolling(window=period).mean()
+        rs = gain.div(loss.replace(0, np.nan))
+        return 100 - (100 / (1 + rs))
 
-        rs = gain/loss
-        rsi = 100 - (100/(1+rs))
-        return rsi
-    
-    def build_tcn_block(self,x,filters,kernel_size,dilation_rate):
-        conv = Conv1D(filters,kernel_size,padding = 'causal',dilation_rate = dilation_rate)
-        conv = BatchNormalization()(conv)
-        conv = ReLU()(conv)
-        conv = Conv1D(filters,kernel_size,padding = 'causal',dilation_rate = dilation_rate)
-        conv = BatchNormalization()(conv)
-        conv = ReLU()(conv)
-        return conv
-    
-    def TCN_model(self,input_shape):
-        inputs = Input(shape = input_shape)
+    def _build_feature_frame(self, stock):
+        df = self.data[stock].copy()
+        df["Open-Close"] = df["Open"] - df["Close"]
+        df["High-Low"] = df["High"] - df["Low"]
+        df["SMA-10"] = df["Close"].rolling(window=10).mean()
+        df["SMA-50"] = df["Close"].rolling(window=50).mean()
+        df["Momentum"] = df["Close"] - df["Close"].shift(10)
+        df["RSI"] = self._calculate_rsi(df["Close"])
+        df["Volume_Change"] = df["Volume"].pct_change()
+        df = df.replace([np.inf, -np.inf], np.nan).ffill()
+
+        next_close = df["Close"].shift(-1)
+        df["Target"] = np.where(next_close.isna(), np.nan, np.where(next_close > df["Close"], 1, 0))
+        return df
+
+    def feature_engineering(self, stock):
+        df = self._build_feature_frame(stock).dropna(
+            subset=["Open-Close", "High-Low", "SMA-10", "SMA-50", "Momentum", "RSI", "Volume_Change", "Target"]
+        )
+        features = df[["Open-Close", "High-Low", "SMA-10", "SMA-50", "Momentum", "RSI", "Volume_Change"]]
+        target = df["Target"].astype(int)
+        return self.build_sequence_dataset(features, target, self.sequence_length)
+
+    def feature_engineering_live(self, stock):
+        df = self._build_feature_frame(stock).dropna(
+            subset=["Open-Close", "High-Low", "SMA-10", "SMA-50", "Momentum", "RSI", "Volume_Change"]
+        )
+        features = df[["Open-Close", "High-Low", "SMA-10", "SMA-50", "Momentum", "RSI", "Volume_Change"]]
+        placeholder_target = pd.Series(0, index=features.index, dtype=int)
+        X, _, index = self.build_sequence_dataset(features, placeholder_target, self.sequence_length)
+        return X, index
+
+    def _tcn_block(self, x, dilation_rate):
+        residual = x
+        y = layers.Conv1D(
+            filters=self.filters,
+            kernel_size=self.kernel_size,
+            padding="causal",
+            dilation_rate=dilation_rate,
+        )(x)
+        y = layers.BatchNormalization()(y)
+        y = layers.ReLU()(y)
+        y = layers.Dropout(self.dropout)(y)
+        y = layers.Conv1D(
+            filters=self.filters,
+            kernel_size=self.kernel_size,
+            padding="causal",
+            dilation_rate=dilation_rate,
+        )(y)
+        y = layers.BatchNormalization()(y)
+
+        if residual.shape[-1] != self.filters:
+            residual = layers.Conv1D(self.filters, kernel_size=1, padding="same")(residual)
+
+        y = layers.Add()([y, residual])
+        y = layers.ReLU()(y)
+        return y
+
+    def build_model(self, input_shape):
+        inputs = tf.keras.Input(shape=input_shape)
         x = inputs
         for i in range(self.num_layers):
-            dilation_rate = 2**i
-            x = self.build_tcn_block(x,self.filters,self.kernel_size,dilation_rate)
+            x = self._tcn_block(x, dilation_rate=2 ** i)
 
-        x = Flatten()(x)
-        x = Dense(50,activation = 'relu')(x)
-        outputs = Dense(1,activation = 'sigmoid')(x)
+        x = layers.GlobalAveragePooling1D()(x)
+        x = layers.Dense(self.dense_units, activation="relu")(x)
+        x = layers.Dropout(self.dropout)(x)
+        outputs = layers.Dense(1, activation="sigmoid")(x)
 
-        model = Model(inputs,outputs)
-        model.compile(optimizer = 'adam',loss = 'binary_crossentropy',metrics = ['accuracy'])
+        model = tf.keras.Model(inputs, outputs)
+        model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
         return model
-    
-    def generate_signal_strategy(self,stock):
-        X,Y = self.create_classification_trading_condition(stock)
-        X = X.reshape(X.shape[0],X.shape[1],X.shape[2])
-
-        model = self.TCN_model((X.shape[1],X.shape[2]))
-        model.fit(X,Y,epochs = 10, batch_size = 32, verbose = 0)
-
-        predictions = model.predict(X)
-        signals = pd.DataFrame(index = self.data[stock].index)
-        signals['Prediction'] = predictions.flatten()
-        signals['Position'] = signals['Prediction'].apply(lambda x: 1 if x >= 0.5 else 0 )
-
-        signals['Signal'] = 0
-        signals.loc[signals['Position']>signals['Position'].shift(1),'Signal'] = 1
-        signals.loc[signals['Position']< signals['Position'].shift(1),'Signal'] = -1
-
-        signals['return'] = np.log(self.data[(stock,'Close')]/self.data[(stock,'Close')].shift(1))
-
-        self.signal_data[stock] = signals
-
-
-
