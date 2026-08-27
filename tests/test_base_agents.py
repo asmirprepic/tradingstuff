@@ -8,6 +8,7 @@ from agents.base_agents.nn_based_agent import NNBasedAgent
 from agents.base_agents.sequential_based import SequentialNNAgent
 from agents.ml_based.anomaly.autoencoder_agent import AutoencoderAgent
 from agents.ml_based.deep_learning.cnn_agent import CNNAgent
+from agents.ml_based.deep_learning.lstm_attention_agent import LSTMAttentionAgent
 from agents.ml_based.deep_learning.nn_classification_agent import DenseNNAgent
 from agents.ml_based.regime.hmm_based_agent import HMMRegimeAgent
 from agents.ml_based.classical.logistic_reg_agent import LRAgent
@@ -151,6 +152,31 @@ class ProbeLSTMAgent(LSTMAgent):
                 "Position": [0, 1, 1],
                 "Signal": [0, 1, 0],
                 "return": [0.01, 0.02, -0.01],
+            },
+            index=index,
+        )
+
+
+class ProbeLSTMAttentionAgent(LSTMAttentionAgent):
+    def __init__(self, data):
+        self.train_calls = []
+        self.predict_calls = []
+        super().__init__(data, sequence_length=3)
+
+    def train_model(self, stock):
+        self.train_calls.append(stock)
+
+    def predict_signals(self, stock, mode="backtest", threshold=0.5):
+        self.predict_calls.append((stock, mode, threshold))
+        index = self.data[stock].index[-2:]
+        return pd.DataFrame(
+            {
+                "Prediction": [0, 1],
+                "ProbUp": [0.35, 0.8],
+                "SignalStrength": [0.35, 0.8],
+                "Position": [0, 1],
+                "Signal": [0, 1],
+                "return": [-0.01, 0.02],
             },
             index=index,
         )
@@ -413,6 +439,7 @@ class BaseAgentsTests(unittest.TestCase):
     def test_sequence_agents_share_base_contract(self):
         self.assertTrue(issubclass(CNNAgent, SequentialNNAgent))
         self.assertTrue(issubclass(LSTMAgent, SequentialNNAgent))
+        self.assertTrue(issubclass(LSTMAttentionAgent, SequentialNNAgent))
         self.assertTrue(issubclass(TCNAgent, SequentialNNAgent))
         self.assertTrue(issubclass(TransformerAgent, SequentialNNAgent))
 
@@ -425,6 +452,18 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(X.ndim, 3)
         self.assertEqual(X.shape[1], 4)
         self.assertEqual(X.shape[2], 2)
+        self.assertEqual(len(X), len(y))
+        self.assertEqual(len(X), len(index))
+
+    def test_lstm_attention_feature_engineering_returns_aligned_sequences(self):
+        data = make_market_data(periods=20)
+        agent = LSTMAttentionAgent(data, sequence_length=4)
+
+        X, y, index = agent.feature_engineering("AAA")
+
+        self.assertEqual(X.ndim, 3)
+        self.assertEqual(X.shape[1], 4)
+        self.assertEqual(X.shape[2], 4)
         self.assertEqual(len(X), len(y))
         self.assertEqual(len(X), len(index))
 
@@ -451,6 +490,19 @@ class BaseAgentsTests(unittest.TestCase):
 
         self.assertEqual(agent.train_calls, ["AAA"])
         self.assertEqual(agent.predict_calls, [("AAA", "backtest", 0.7)])
+        self.assertTrue(signals.equals(agent.signal_data["AAA"]))
+
+    def test_lstm_attention_generate_signal_strategy_uses_shared_pipeline_without_ctor_training(self):
+        data = make_market_data(periods=12)
+        agent = ProbeLSTMAttentionAgent(data)
+
+        self.assertEqual(agent.train_calls, [])
+        self.assertEqual(agent.predict_calls, [])
+
+        signals = agent.generate_signal_strategy("AAA", mode="backtest", threshold=0.6)
+
+        self.assertEqual(agent.train_calls, ["AAA"])
+        self.assertEqual(agent.predict_calls, [("AAA", "backtest", 0.6)])
         self.assertTrue(signals.equals(agent.signal_data["AAA"]))
 
     def test_tcn_generate_signal_strategy_uses_shared_pipeline_without_ctor_training(self):

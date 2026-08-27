@@ -57,9 +57,11 @@ _KEEP_AGENT_SPECS = {
     "KNNAgent": ("agents.ml_based.classical.knn_agent", "KNNAgent"),
     "LRAgent": ("agents.ml_based.classical.logistic_reg_agent", "LRAgent"),
     "LSTMAgent": ("agents.ml_based.deep_learning.lstm_agent", "LSTMAgent"),
+    "LSTMAttentionAgent": ("agents.ml_based.deep_learning.lstm_attention_agent", "LSTMAttentionAgent"),
     "NaiveBayesAgent": ("agents.ml_based.classical.naive_bayes_agent", "NaiveBayesAgent"),
     "DenseNNAgent": ("agents.ml_based.deep_learning.nn_classification_agent", "DenseNNAgent"),
     "SVMAgent": ("agents.ml_based.classical.svm_agent", "SVMAgent"),
+    "TCNAgent": ("agents.ml_based.deep_learning.tcn_agent", "TCNAgent"),
     "TransformerAgent": ("agents.ml_based.deep_learning.transformer_agent", "TransformerAgent"),
 }
 
