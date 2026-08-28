@@ -26,5 +26,6 @@ class LRAgent(MLBasedAgent):
         print(f"[{stock}] Running generate_signal_strategy in {mode} mode.")
 
         self.train_model(stock)
-        signals = self.predict_signals(stock)
+        signals = self.predict_signals(stock, mode=mode)
         self.signal_data[stock] = signals
+        return signals

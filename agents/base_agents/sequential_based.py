@@ -168,6 +168,8 @@ class SequentialNNAgent(TradingAgent, ABC):
     def predict_signals(self, stock, mode='backtest', threshold=0.5):
         if stock not in self.models:
             raise ValueError(f"Model for {stock} not trained.")
+        if stock not in self.train_data:
+            raise ValueError(f"Training data for {stock} is missing.")
 
         model = self.models[stock]
         data = self.train_data[stock]
@@ -250,11 +252,20 @@ class SequentialNNAgent(TradingAgent, ABC):
 
         return signals
 
-    def run_all_walk_forward(self, initial_train_size=100, step_size=1):
+    def run_all_walk_forward(self, initial_train_size=100, step_size=1, **kwargs):
+        if "intial_train_size" in kwargs:
+            initial_train_size = kwargs.pop("intial_train_size")
+
+        self.signal_data = {}
         for stock in self.stocks_in_data:
             try:
                 print(f"[WALK-FORWARD] {stock}")
-                self.signal_data[stock] = self.walk_forward_predict(stock, initial_train_size, step_size)
+                self.signal_data[stock] = self.walk_forward_predict(
+                    stock,
+                    initial_train_size,
+                    step_size,
+                    **kwargs,
+                )
             except Exception as e:
                 print(f"[WARNING] {stock} failed: {e}")
         self.calculate_returns()

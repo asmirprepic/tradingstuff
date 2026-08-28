@@ -132,6 +132,36 @@ class DummySequentialAgent(SequentialNNAgent):
         raise NotImplementedError
 
 
+class ProbeSequentialWalkForwardAgent(SequentialNNAgent):
+    def __init__(self, data):
+        self.walk_calls = []
+        super().__init__(data)
+
+    def feature_engineering(self, stock):
+        raise NotImplementedError
+
+    def build_model(self, input_shape):
+        raise NotImplementedError
+
+    def walk_forward_predict(self, stock, initial_train_size=100, step_size=1, threshold=0.5):
+        self.walk_calls.append((stock, initial_train_size, step_size, threshold))
+        index = self.data[stock].index[-2:]
+        return pd.DataFrame(
+            {
+                "Prediction": [0, 1],
+                "ProbUp": [0.4, 0.7],
+                "SignalStrength": [0.4, 0.7],
+                "Position": [0, 1],
+                "Signal": [0, 1],
+                "return": [0.01, 0.02],
+            },
+            index=index,
+        )
+
+    def generate_signal_strategy(self, stock, *args, **kwargs):
+        raise NotImplementedError
+
+
 class ProbeLSTMAgent(LSTMAgent):
     def __init__(self, data):
         self.train_calls = []
@@ -356,6 +386,27 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(signals.index[-1], data[stock].index[-1])
         self.assertEqual(len(signals), len(live_x))
 
+    def test_lr_generate_signal_strategy_honors_mode_and_returns_signals(self):
+        index = pd.date_range("2024-01-01", periods=20, freq="B")
+        close = np.array(
+            [100.0, 101.0, 100.0, 102.0, 101.0, 103.0, 102.0, 104.0, 103.0, 105.0,
+             104.0, 106.0, 105.0, 107.0, 106.0, 108.0, 107.0, 109.0, 108.0, 110.0]
+        )
+        columns = pd.MultiIndex.from_product([[ "AAA"], ["Open", "High", "Low", "Close", "Volume"]])
+        data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        data[("AAA", "Close")] = close
+        data[("AAA", "Open")] = close + 0.5
+        data[("AAA", "High")] = close + 1.0
+        data[("AAA", "Low")] = close - 1.0
+        data[("AAA", "Volume")] = np.arange(len(close)) + 1000
+        stock = "AAA"
+        agent = LRAgent(data)
+
+        signals = agent.generate_signal_strategy(stock, mode="live")
+
+        self.assertIs(signals, agent.signal_data[stock])
+        self.assertEqual(signals.index[-1], data[stock].index[-1])
+
     def test_nn_predict_signals_uses_training_stats_and_emits_score(self):
         data = make_market_data(periods=8)
         stock = "AAA"
@@ -442,6 +493,16 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertTrue(issubclass(LSTMAttentionAgent, SequentialNNAgent))
         self.assertTrue(issubclass(TCNAgent, SequentialNNAgent))
         self.assertTrue(issubclass(TransformerAgent, SequentialNNAgent))
+
+    def test_sequential_run_all_walk_forward_forwards_threshold_and_alias(self):
+        data = make_market_data(periods=12)
+        agent = ProbeSequentialWalkForwardAgent(data)
+
+        agent.run_all_walk_forward(intial_train_size=7, step_size=2, threshold=0.65)
+
+        self.assertEqual(agent.walk_calls, [("AAA", 7, 2, 0.65)])
+        self.assertIn("AAA", agent.signal_data)
+        self.assertIn("AAA", agent.returns_data)
 
     def test_cnn_feature_engineering_returns_aligned_sequences(self):
         data = make_market_data(periods=20)
