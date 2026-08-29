@@ -29,7 +29,9 @@ class ClusteringFilteredKNNAgent(MLBasedAgent):
         print(f"[{stock}] Generating signals in {mode} mode using {self.algorithm_name}...")
         if stock not in self.models:
             self.train_model(stock)
-        self.signal_data[stock] = self.predict_signals(stock, mode=mode)
+        signals = self.predict_signals(stock, mode=mode)
+        self.signal_data[stock] = signals
+        return signals
 
     def filter_stocks_by_cluster(self, as_of_date=None):
         """

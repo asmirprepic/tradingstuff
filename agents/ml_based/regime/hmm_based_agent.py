@@ -28,9 +28,7 @@ class HMMRegimeAgent(TradingAgent):
         self.train_data = {}
         self.best_regimes = {}
         self.regime_return_maps = {}
-
-        if auto_generate:
-            self.run_all()
+        self.auto_generate = bool(auto_generate)
 
     def _require_hmmlearn(self):
         if GaussianHMM is None:

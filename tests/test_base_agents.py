@@ -3,11 +3,13 @@ import unittest
 import numpy as np
 import pandas as pd
 
+from agents.ml_based import ML_TYPE_MODULES
 from agents.base_agents.ml_trading_agent import MLBasedAgent
 from agents.base_agents.nn_based_agent import NNBasedAgent
 from agents.base_agents.sequential_based import SequentialNNAgent
 from agents.ml_based.anomaly.autoencoder_agent import AutoencoderAgent
 from agents.ml_based.deep_learning.cnn_agent import CNNAgent
+from agents.ml_based.clustering.clustering_agent import ClusteringFilteredKNNAgent
 from agents.ml_based.deep_learning.lstm_attention_agent import LSTMAttentionAgent
 from agents.ml_based.deep_learning.nn_classification_agent import DenseNNAgent
 from agents.ml_based.regime.hmm_based_agent import HMMRegimeAgent
@@ -299,6 +301,32 @@ class ProbeAutoencoderAgent(AutoencoderAgent):
                 "Position": [0, 1, 1],
                 "Signal": [0, 1, 0],
                 "return": [0.01, 0.03, -0.01],
+            },
+            index=index,
+        )
+
+
+class ProbeClusteringAgent(ClusteringFilteredKNNAgent):
+    def __init__(self, data):
+        self.train_calls = []
+        self.predict_calls = []
+        super().__init__(data)
+
+    def train_model(self, stock, split_ratio=0.8):
+        self.train_calls.append((stock, split_ratio))
+        self.models[stock] = object()
+        self.train_data[stock] = (pd.DataFrame(), pd.DataFrame(), pd.Series(dtype=float), pd.Series(dtype=float))
+
+    def predict_signals(self, stock, mode="backtest", threshold=0.5, timing="open"):
+        self.predict_calls.append((stock, mode, threshold, timing))
+        index = self.data[stock].index[-2:]
+        return pd.DataFrame(
+            {
+                "Prediction": [0, 1],
+                "SignalStrength": [0.4, 0.7],
+                "Position": [0, 1],
+                "Signal": [0, 1],
+                "return": [0.01, 0.02],
             },
             index=index,
         )
@@ -689,6 +717,32 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("AAA", agent.signal_data)
         self.assertIn("AAA", agent.returns_data)
         self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
+
+    def test_hmm_agent_auto_generate_does_not_run_in_constructor(self):
+        data = make_market_data(periods=12)
+        agent = HMMRegimeAgent(data, auto_generate=True)
+
+        self.assertTrue(agent.auto_generate)
+        self.assertEqual(agent.signal_data, {})
+        self.assertEqual(agent.returns_data, {})
+
+    def test_clustering_agent_generate_signal_strategy_returns_signals(self):
+        data = make_market_data(periods=12)
+        agent = ProbeClusteringAgent(data)
+
+        signals = agent.generate_signal_strategy("AAA", mode="live")
+
+        self.assertEqual(agent.train_calls, [("AAA", 0.8)])
+        self.assertEqual(agent.predict_calls, [("AAA", "live", 0.5, "open")])
+        self.assertIs(signals, agent.signal_data["AAA"])
+
+    def test_ml_type_modules_excludes_legacy_unstable_entries(self):
+        deep_learning_modules = set(ML_TYPE_MODULES["deep_learning"])
+
+        self.assertNotIn("bayesian_nn", deep_learning_modules)
+        self.assertNotIn("nn_classification_aggregate", deep_learning_modules)
+        self.assertNotIn("nn_classsification_aggregate", deep_learning_modules)
+        self.assertNotIn("transformer_agent_test", deep_learning_modules)
 
     def test_momentum_agent_can_skip_constructor_generation(self):
         data = make_market_data(periods=12)

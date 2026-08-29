@@ -31,16 +31,12 @@ ML_TYPE_MODULES = {
     ),
     "clustering": ("clustering_agent",),
     "deep_learning": (
-        "bayesian_nn",
         "cnn_agent",
         "lstm_agent",
         "lstm_attention_agent",
         "nn_classification_agent",
-        "nn_classification_aggregate",
-        "nn_classsification_aggregate",
         "tcn_agent",
         "transformer_agent",
-        "transformer_agent_test",
     ),
     "regime": ("hmm_based_agent",),
     "reinforcement_learning": (
