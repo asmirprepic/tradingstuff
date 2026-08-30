@@ -137,6 +137,13 @@ class MLBasedAgent(TradingAgent, ABC):
             'recall': recall_score(Y_test, Y_pred, zero_division=0),
             'f1_score': f1_score(Y_test, Y_pred, zero_division=0)
         }
+        self.training_info[stock] = {
+            "SplitRatio": split_ratio,
+            "Accuracy": metrics["accuracy"],
+            "Precision": metrics["precision"],
+            "Recall": metrics["recall"],
+            "F1Score": metrics["f1_score"],
+        }
 
         print(f"\nModel Performance for {stock} ({self.algorithm_name}):")
         for k, v in metrics.items():

@@ -131,7 +131,7 @@ class VAEAgent(TradingAgent):
         }
         if len(X_test_scaled) > 0:
             fit_kwargs["validation_data"] = (X_test_scaled, X_test_scaled)
-        model.fit(**fit_kwargs)
+        history = model.fit(**fit_kwargs)
 
         train_pred = model.predict(X_train_scaled, verbose=0)
         train_mse = np.mean(np.power(X_train_scaled - train_pred, 2), axis=1)
@@ -147,6 +147,16 @@ class VAEAgent(TradingAgent):
             "index_train": pd.Index(index_train),
             "index_test": pd.Index(index_test),
             "percentile": percentile,
+        }
+        history_dict = getattr(history, "history", {}) or {}
+        self.training_info[stock] = {
+            "SplitRatio": self.split_ratio,
+            "EpochsRequested": self.epochs,
+            "EpochsRan": len(history_dict.get("loss", [])),
+            "Loss": history_dict.get("loss", [np.nan])[-1] if history_dict.get("loss") else np.nan,
+            "ValLoss": history_dict.get("val_loss", [np.nan])[-1] if history_dict.get("val_loss") else np.nan,
+            "Threshold": threshold,
+            "Percentile": percentile,
         }
         return threshold
 

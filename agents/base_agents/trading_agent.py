@@ -32,6 +32,201 @@ class TradingAgent(ABC):
         self.signal_data = {}
         self.returns_data = {}
         self.score_column = None
+        self.training_info = {}
+
+    def _trained_model_for_stock(self, stock):
+        for attr in ("models", "hmm_models"):
+            container = getattr(self, attr, None)
+            if isinstance(container, dict) and stock in container:
+                return container[stock]
+        return None
+
+    def _training_parts(self, stock):
+        train_data = getattr(self, "train_data", {})
+        if stock not in train_data:
+            return {}
+
+        data = train_data[stock]
+        if isinstance(data, tuple) and len(data) >= 4:
+            x_train, x_test, y_train, y_test = data[:4]
+            return {
+                "x_train": x_train,
+                "x_test": x_test,
+                "y_train": y_train,
+                "y_test": y_test,
+                "index_train": getattr(x_train, "index", None),
+                "index_test": getattr(x_test, "index", None),
+                "raw": data,
+            }
+
+        if isinstance(data, dict):
+            x_train = data.get("X_train", data.get("df_train"))
+            x_test = data.get("X_test", data.get("df_test"))
+            y_train = data.get("y_train", data.get("rewards_train"))
+            y_test = data.get("y_test", data.get("rewards_test"))
+            return {
+                "x_train": x_train,
+                "x_test": x_test,
+                "y_train": y_train,
+                "y_test": y_test,
+                "index_train": data.get("index_train", getattr(x_train, "index", None)),
+                "index_test": data.get("index_test", getattr(x_test, "index", None)),
+                "raw": data,
+            }
+
+        return {"raw": data}
+
+    def _length_or_none(self, value):
+        try:
+            return len(value)
+        except TypeError:
+            return None
+
+    def _shape_or_none(self, value):
+        shape = getattr(value, "shape", None)
+        if shape is not None:
+            return tuple(shape)
+        try:
+            return tuple(np.asarray(value).shape)
+        except Exception:
+            return None
+
+    def _feature_metadata(self, x_train, raw_train_data):
+        feature_count = None
+        input_shape = None
+
+        if x_train is not None:
+            shape = self._shape_or_none(x_train)
+            if shape:
+                if len(shape) >= 2:
+                    feature_count = int(shape[-1])
+                if len(shape) > 2:
+                    input_shape = shape[1:]
+            columns = getattr(x_train, "columns", None)
+            if columns is not None:
+                feature_count = len(columns)
+                input_shape = (len(columns),)
+
+        if (feature_count is None or feature_count == 0) and isinstance(raw_train_data, dict):
+            feature_cols = raw_train_data.get("feature_cols")
+            if feature_cols is not None:
+                feature_count = len(feature_cols)
+                input_shape = (len(feature_cols),)
+
+        return feature_count, input_shape
+
+    def _index_bounds(self, index_like):
+        if index_like is None:
+            return None, None
+        try:
+            if len(index_like) == 0:
+                return None, None
+            return index_like[0], index_like[-1]
+        except Exception:
+            return None, None
+
+    def _training_row(self, stock):
+        parts = self._training_parts(stock)
+        raw_train_data = parts.get("raw")
+        x_train = parts.get("x_train")
+        x_test = parts.get("x_test")
+        train_start, train_end = self._index_bounds(parts.get("index_train"))
+        test_start, test_end = self._index_bounds(parts.get("index_test"))
+        feature_count, input_shape = self._feature_metadata(x_train, raw_train_data)
+
+        row = {
+            "Stock": stock,
+            "Agent": self.algorithm_name,
+            "ModelClass": None,
+            "TrainSamples": self._length_or_none(x_train),
+            "TestSamples": self._length_or_none(x_test),
+            "FeatureCount": feature_count,
+            "InputShape": input_shape,
+            "TrainStart": train_start,
+            "TrainEnd": train_end,
+            "TestStart": test_start,
+            "TestEnd": test_end,
+        }
+
+        model = self._trained_model_for_stock(stock)
+        if model is not None:
+            row["ModelClass"] = type(model).__name__
+
+        for attr_name, column_name in (
+            ("split_ratio", "SplitRatio"),
+            ("epochs", "EpochsRequested"),
+            ("episodes", "Episodes"),
+            ("n_states", "NumStates"),
+        ):
+            if hasattr(self, attr_name):
+                row[column_name] = getattr(self, attr_name)
+
+        if isinstance(raw_train_data, dict):
+            if "percentile" in raw_train_data:
+                row["Percentile"] = raw_train_data["percentile"]
+            if "epsilon_final" in raw_train_data:
+                row["EpsilonFinal"] = raw_train_data["epsilon_final"]
+
+        thresholds = getattr(self, "thresholds", None)
+        if isinstance(thresholds, dict) and stock in thresholds:
+            row["Threshold"] = thresholds[stock]
+
+        best_regimes = getattr(self, "best_regimes", None)
+        if isinstance(best_regimes, dict) and stock in best_regimes:
+            row["BestRegime"] = best_regimes[stock]
+
+        training_info = getattr(self, "training_info", {})
+        if isinstance(training_info, dict):
+            row.update(training_info.get(stock, {}))
+
+        return row
+
+    def training_summary(self, stock=None):
+        train_data = getattr(self, "train_data", {})
+        training_info = getattr(self, "training_info", {})
+
+        if stock is not None:
+            stocks = [stock]
+        else:
+            stocks = sorted(set(train_data.keys()) | set(training_info.keys()))
+
+        if not stocks:
+            raise ValueError("No training information is available yet.")
+
+        rows = [self._training_row(stock_name) for stock_name in stocks]
+        summary = pd.DataFrame(rows)
+
+        preferred_columns = [
+            "Stock",
+            "Agent",
+            "ModelClass",
+            "TrainSamples",
+            "TestSamples",
+            "FeatureCount",
+            "InputShape",
+            "TrainStart",
+            "TrainEnd",
+            "TestStart",
+            "TestEnd",
+            "SplitRatio",
+            "EpochsRequested",
+            "EpochsRan",
+            "Accuracy",
+            "Precision",
+            "Recall",
+            "F1Score",
+            "Loss",
+            "ValLoss",
+            "Threshold",
+            "Percentile",
+            "BestRegime",
+            "NumStates",
+            "Episodes",
+            "EpsilonFinal",
+        ]
+        ordered_columns = [col for col in preferred_columns if col in summary.columns]
+        remaining_columns = [col for col in summary.columns if col not in ordered_columns]
+        return summary[ordered_columns + remaining_columns]
 
     def calculate_returns(self):
         """

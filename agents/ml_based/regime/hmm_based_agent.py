@@ -84,6 +84,11 @@ class HMMRegimeAgent(TradingAgent):
             "index_train": pd.Index(df_train.index),
             "index_test": pd.Index(df_test.index),
         }
+        self.training_info[stock] = {
+            "SplitRatio": self.split_ratio if split_ratio is None else split_ratio,
+            "NumStates": self.n_states,
+            "BestRegime": best_regime,
+        }
 
     def predict_signals(self, stock, mode="backtest"):
         if stock not in self.hmm_models:

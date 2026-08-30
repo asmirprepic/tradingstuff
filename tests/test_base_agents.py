@@ -380,6 +380,23 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertFalse(agent.signal_data["AAA"].empty)
         self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
 
+    def test_ml_training_summary_reports_metrics_and_split_ranges(self):
+        data = make_market_data(periods=80)
+        agent = LRAgent(data)
+
+        agent.train_model("AAA")
+        summary = agent.training_summary("AAA")
+        row = summary.iloc[0]
+
+        self.assertEqual(row["Stock"], "AAA")
+        self.assertEqual(row["Agent"], "Logistic_Regression")
+        self.assertEqual(row["ModelClass"], "LogisticRegression")
+        self.assertEqual(row["FeatureCount"], 9)
+        self.assertGreater(row["TrainSamples"], 0)
+        self.assertGreater(row["TestSamples"], 0)
+        self.assertIn("Accuracy", summary.columns)
+        self.assertIn("F1Score", summary.columns)
+
     def test_ml_predict_signals_preserves_short_positions_for_minus_one_labels(self):
         data = make_market_data(periods=6)
         stock = "AAA"
@@ -717,6 +734,20 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("AAA", agent.signal_data)
         self.assertIn("AAA", agent.returns_data)
         self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
+
+    def test_hmm_training_summary_includes_regime_metadata(self):
+        data = make_market_data(periods=12)
+        agent = ProbeHMMRegimeAgent(data)
+
+        agent.generate_signal_strategy("AAA", mode="backtest")
+        summary = agent.training_summary("AAA")
+        row = summary.iloc[0]
+
+        self.assertEqual(row["Stock"], "AAA")
+        self.assertEqual(row["Agent"], "HMMRegime")
+        self.assertEqual(row["FeatureCount"], 3)
+        self.assertEqual(row["BestRegime"], 1)
+        self.assertEqual(row["NumStates"], agent.n_states)
 
     def test_hmm_agent_auto_generate_does_not_run_in_constructor(self):
         data = make_market_data(periods=12)

@@ -164,6 +164,11 @@ class DeepQLearningAgent(TradingAgent):
             "X_train_norm": X_train_norm,
             "X_test_norm": X_test_norm,
         }
+        self.training_info[stock] = {
+            "SplitRatio": self.split_ratio,
+            "Episodes": self.episodes,
+            "EpsilonFinal": epsilon,
+        }
 
     def predict_signals(self, stock, mode="backtest", threshold=0.0):
         if stock not in self.models:

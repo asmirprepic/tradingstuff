@@ -144,7 +144,7 @@ class SequentialNNAgent(TradingAgent, ABC):
         model = self.build_model(input_shape=X_train.shape[1:])
 
         early_stopping = EarlyStopping(monitor="val_loss", patience=3, restore_best_weights=True)
-        model.fit(
+        history = model.fit(
             X_train_norm, y_train,
             validation_data=(X_test_norm, y_test),
             epochs=self.epochs,
@@ -163,6 +163,14 @@ class SequentialNNAgent(TradingAgent, ABC):
             "index_test": pd.Index(index_test),
             "mu": mu,
             "sigma": sigma
+        }
+        history_dict = getattr(history, "history", {}) or {}
+        self.training_info[stock] = {
+            "SplitRatio": self.split_ratio,
+            "EpochsRequested": self.epochs,
+            "EpochsRan": len(history_dict.get("loss", [])),
+            "Loss": history_dict.get("loss", [np.nan])[-1] if history_dict.get("loss") else np.nan,
+            "ValLoss": history_dict.get("val_loss", [np.nan])[-1] if history_dict.get("val_loss") else np.nan,
         }
 
     def predict_signals(self, stock, mode='backtest', threshold=0.5):
