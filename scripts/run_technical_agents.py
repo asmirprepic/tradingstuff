@@ -14,6 +14,7 @@ import pandas as pd
 from data_handling.get_stock_data import GetStockDataTest
 from data_handling.get_stock_tickers_upd import GetTickers
 from agents.technical.bollinger_bands_agent import BollingerBandsAgent
+from agents.technical.adx_dmi_agent import ADXDMIAgent
 from agents.technical.high_low import HighLowAgent
 from agents.technical.macd_agent import MACDAgent
 from agents.technical.mean_reversion_agent import MeanReversionAgent
@@ -37,6 +38,7 @@ AGENT_ORDER = [
     "moving_average_crossover",
     "macd",
     "bollinger",
+    "adx_dmi",
     "mean_reversion",
     "rsi",
     "supertrend",
@@ -174,6 +176,8 @@ def build_agent(agent_name, price_df):
         return MACDAgent(price_df, short_window=12, long_window=26, signal_window=9)
     if agent_name == "bollinger":
         return BollingerBandsAgent(price_df, period=20, num_std_dev=2.0)
+    if agent_name == "adx_dmi":
+        return ADXDMIAgent(price_df, period=14, adx_threshold=20.0)
     if agent_name == "mean_reversion":
         return MeanReversionAgent(price_df, lookback_period=20, threshold=2.0)
     if agent_name == "rsi":

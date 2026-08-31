@@ -19,6 +19,7 @@ from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
 from agents.ml_based.deep_learning.tcn_agent import TCNAgent
 from agents.ml_based.deep_learning.transformer_agent import TransformerAgent
 from agents.ml_based.classical.svm_agent import SVMAgent
+from agents.technical.adx_dmi_agent import ADXDMIAgent
 from agents.technical.bollinger_bands_agent import BollingerBandsAgent
 from agents.technical.high_low import HighLowAgent
 from agents.technical.macd_agent import MACDAgent
@@ -1129,6 +1130,57 @@ class BaseAgentsTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             BollingerBandsAgent(data, period=5, num_std_dev=0, auto_generate=False)
+
+    def test_adx_dmi_agent_can_skip_constructor_generation(self):
+        data = make_market_data(periods=20)
+        agent = ADXDMIAgent(data, period=3, adx_threshold=15.0, auto_generate=False)
+
+        self.assertEqual(agent.signal_data, {})
+        self.assertEqual(agent.returns_data, {})
+
+    def test_adx_dmi_agent_validates_parameters(self):
+        data = make_market_data(periods=20)
+
+        with self.assertRaises(ValueError):
+            ADXDMIAgent(data, period=0, adx_threshold=20.0, auto_generate=False)
+
+        with self.assertRaises(ValueError):
+            ADXDMIAgent(data, period=3, adx_threshold=-1.0, auto_generate=False)
+
+    def test_adx_dmi_agent_uses_warmup_gating_and_directional_positions(self):
+        index = pd.date_range("2024-01-01", periods=12, freq="B")
+        close = np.array([100.0, 101.0, 103.0, 106.0, 110.0, 115.0, 111.0, 107.0, 103.0, 99.0, 96.0, 94.0])
+        open_ = np.array([99.5, 100.5, 102.0, 105.0, 109.0, 114.0, 112.0, 108.0, 104.0, 100.0, 97.0, 95.0])
+        high = np.maximum(open_, close) + 1.0
+        low = np.minimum(open_, close) - 1.0
+        volume = np.arange(len(close)) + 1000
+        columns = pd.MultiIndex.from_product([["AAA"], ["Open", "High", "Low", "Close", "Volume"]])
+        data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        data[("AAA", "Open")] = open_
+        data[("AAA", "High")] = high
+        data[("AAA", "Low")] = low
+        data[("AAA", "Close")] = close
+        data[("AAA", "Volume")] = volume
+
+        agent = ADXDMIAgent(data, period=3, adx_threshold=10.0, auto_generate=False)
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertTrue(signals["SignalStrength"].iloc[:4].isna().all())
+        self.assertTrue((signals["Position"].iloc[:4] == 0).all())
+        self.assertTrue(signals["Valid"].iloc[:4].eq(False).all())
+        self.assertIn(1, signals["Position"].tolist())
+        self.assertIn(-1, signals["Position"].tolist())
+
+    def test_adx_dmi_agent_run_all_populates_returns(self):
+        data = make_market_data(periods=20)
+        agent = ADXDMIAgent(data, period=3, adx_threshold=15.0, auto_generate=False)
+
+        agent.run_all()
+
+        self.assertIn("AAA", agent.signal_data)
+        self.assertIn("AAA", agent.returns_data)
+        self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
+        self.assertIn("ADX", agent.signal_data["AAA"].columns)
 
     def test_supertrend_agent_can_skip_constructor_generation(self):
         data = make_market_data(periods=20)
