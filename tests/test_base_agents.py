@@ -35,6 +35,7 @@ from agents.technical.rsi_agent import RSIAgent
 from agents.technical.supertrend_agent import SupertrendAgent
 from agents.technical.volume_price_divergence_agent import VolumePriceDivergenceAgent
 from agents.technical.volume_weighted_average_price_agent import VWAPAgent
+from scripts.run_technical_agents import build_stock_ranking_table
 
 
 def make_market_data(stock="AAA", periods=60):
@@ -1219,6 +1220,36 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("AAA", agent.returns_data)
         self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
         self.assertIn("Supertrend", agent.signal_data["AAA"].columns)
+
+    def test_build_stock_ranking_table_prefers_buy_consensus_and_strong_agent_rank(self):
+        all_recs = pd.DataFrame(
+            [
+                {"Agent": "momentum", "Stock": "AAA", "Recommendation": "Buy", "Score": 0.90},
+                {"Agent": "rsi", "Stock": "AAA", "Recommendation": "Buy", "Score": 0.80},
+                {"Agent": "macd", "Stock": "AAA", "Recommendation": "Hold", "Score": 0.40},
+                {"Agent": "momentum", "Stock": "BBB", "Recommendation": "Sell", "Score": 0.70},
+                {"Agent": "rsi", "Stock": "BBB", "Recommendation": "Hold", "Score": 0.20},
+                {"Agent": "macd", "Stock": "BBB", "Recommendation": "Buy", "Score": 0.30},
+            ]
+        )
+        summary_df = pd.DataFrame(
+            [
+                {"Agent": "momentum", "AvgStrategyReturnPct": 12.0},
+                {"Agent": "macd", "AvgStrategyReturnPct": 8.0},
+                {"Agent": "rsi", "AvgStrategyReturnPct": 2.0},
+            ]
+        )
+
+        ranking = build_stock_ranking_table(all_recs, summary_df)
+
+        self.assertEqual(list(ranking["Stock"]), ["AAA", "BBB"])
+        self.assertEqual(ranking.loc[0, "ConsensusRecommendation"], "Buy")
+        self.assertEqual(ranking.loc[0, "BuyCount"], 2)
+        self.assertEqual(ranking.loc[0, "SellCount"], 0)
+        self.assertGreater(ranking.loc[0, "FinalScore"], ranking.loc[1, "FinalScore"])
+        self.assertEqual(ranking.loc[0, "SupportingAgents"], "momentum, rsi")
+        self.assertIn("SupportingAgentQualityPct", ranking.columns)
+        self.assertIn("BuyAgentRankPct", ranking.columns)
 
 
 if __name__ == "__main__":
