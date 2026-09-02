@@ -35,7 +35,7 @@ from agents.technical.rsi_agent import RSIAgent
 from agents.technical.supertrend_agent import SupertrendAgent
 from agents.technical.volume_price_divergence_agent import VolumePriceDivergenceAgent
 from agents.technical.volume_weighted_average_price_agent import VWAPAgent
-from scripts.run_technical_agents import build_stock_ranking_table
+from scripts.run_technical_agents import build_stock_shortlist_table
 
 
 def make_market_data(stock="AAA", periods=60):
@@ -1221,35 +1221,34 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
         self.assertIn("Supertrend", agent.signal_data["AAA"].columns)
 
-    def test_build_stock_ranking_table_prefers_buy_consensus_and_strong_agent_rank(self):
+    def test_build_stock_shortlist_table_uses_tiers_family_support_and_conflict_counts(self):
         all_recs = pd.DataFrame(
             [
                 {"Agent": "momentum", "Stock": "AAA", "Recommendation": "Buy", "Score": 0.90},
+                {"Agent": "supertrend", "Stock": "AAA", "Recommendation": "Buy", "Score": 0.85},
+                {"Agent": "vwap", "Stock": "AAA", "Recommendation": "Buy", "Score": 0.70},
                 {"Agent": "rsi", "Stock": "AAA", "Recommendation": "Buy", "Score": 0.80},
                 {"Agent": "macd", "Stock": "AAA", "Recommendation": "Hold", "Score": 0.40},
-                {"Agent": "momentum", "Stock": "BBB", "Recommendation": "Sell", "Score": 0.70},
-                {"Agent": "rsi", "Stock": "BBB", "Recommendation": "Hold", "Score": 0.20},
-                {"Agent": "macd", "Stock": "BBB", "Recommendation": "Buy", "Score": 0.30},
-            ]
-        )
-        summary_df = pd.DataFrame(
-            [
-                {"Agent": "momentum", "AvgStrategyReturnPct": 12.0},
-                {"Agent": "macd", "AvgStrategyReturnPct": 8.0},
-                {"Agent": "rsi", "AvgStrategyReturnPct": 2.0},
+                {"Agent": "momentum", "Stock": "BBB", "Recommendation": "Buy", "Score": 0.70},
+                {"Agent": "rsi", "Stock": "BBB", "Recommendation": "Buy", "Score": 0.65},
+                {"Agent": "macd", "Stock": "BBB", "Recommendation": "Sell", "Score": 0.30},
+                {"Agent": "vwap", "Stock": "BBB", "Recommendation": "Hold", "Score": 0.20},
             ]
         )
 
-        ranking = build_stock_ranking_table(all_recs, summary_df)
+        shortlist = build_stock_shortlist_table(all_recs)
 
-        self.assertEqual(list(ranking["Stock"]), ["AAA", "BBB"])
-        self.assertEqual(ranking.loc[0, "ConsensusRecommendation"], "Buy")
-        self.assertEqual(ranking.loc[0, "BuyCount"], 2)
-        self.assertEqual(ranking.loc[0, "SellCount"], 0)
-        self.assertGreater(ranking.loc[0, "FinalScore"], ranking.loc[1, "FinalScore"])
-        self.assertEqual(ranking.loc[0, "SupportingAgents"], "momentum, rsi")
-        self.assertIn("SupportingAgentQualityPct", ranking.columns)
-        self.assertIn("BuyAgentRankPct", ranking.columns)
+        self.assertEqual(list(shortlist["Stock"]), ["AAA", "BBB"])
+        self.assertEqual(shortlist.loc[0, "ShortlistTier"], "TierA")
+        self.assertEqual(shortlist.loc[0, "ConsensusRecommendation"], "Buy")
+        self.assertEqual(shortlist.loc[0, "TrendBuyCount"], 2)
+        self.assertEqual(shortlist.loc[0, "VolumeBuyCount"], 1)
+        self.assertEqual(shortlist.loc[0, "BuyFamilyBreadth"], 3)
+        self.assertEqual(shortlist.loc[0, "ConflictCount"], 0)
+        self.assertEqual(shortlist.loc[1, "ShortlistTier"], "TierC")
+        self.assertEqual(shortlist.loc[1, "ConflictCount"], 1)
+        self.assertEqual(shortlist.loc[0, "SupportFamilies"], "trend, volume_confirmation, mean_reversion")
+        self.assertIn("BuyAgentRankPct", shortlist.columns)
 
 
 if __name__ == "__main__":

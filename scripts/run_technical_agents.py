@@ -51,6 +51,25 @@ AGENT_ORDER = [
     "nr7",
 ]
 
+AGENT_FAMILIES = {
+    "momentum": "trend",
+    "moving_average": "trend",
+    "moving_average_crossover": "trend",
+    "macd": "trend",
+    "adx_dmi": "trend",
+    "supertrend": "trend",
+    "performance": "trend",
+    "bollinger": "mean_reversion",
+    "mean_reversion": "mean_reversion",
+    "rsi": "mean_reversion",
+    "vwap": "volume_confirmation",
+    "obv": "volume_confirmation",
+    "pvt": "volume_confirmation",
+    "volume_price_divergence": "volume_confirmation",
+    "high_low": "breakout",
+    "nr7": "breakout",
+}
+
 
 def make_synthetic_ohlcv(tickers, periods=260):
     idx = pd.date_range(end=pd.Timestamp.today().normalize(), periods=periods, freq="B")
@@ -290,18 +309,36 @@ def _percentile_rank_desc(series):
     return 1.0 - ((ranks - 1.0) / (len(series) - 1.0))
 
 
-def build_stock_ranking_table(all_recs, summary_df):
+def _join_agents(values):
+    return ", ".join(str(v) for v in values if pd.notna(v) and str(v))
+
+
+def _support_count(group, family, recommendation):
+    mask = (group["Family"] == family) & (group["Recommendation"] == recommendation)
+    return int(mask.sum())
+
+
+def _shortlist_tier(buy_count, sell_count, trend_buy_count, volume_buy_count, buy_family_breadth):
+    if buy_count >= 4 and trend_buy_count >= 2 and volume_buy_count >= 1 and sell_count == 0:
+        return "TierA"
+    if buy_count >= 3 and trend_buy_count >= 1 and buy_family_breadth >= 2 and sell_count <= 1:
+        return "TierB"
+    if buy_count >= 2 and buy_family_breadth >= 2 and sell_count <= 1:
+        return "TierC"
+    if buy_count >= 2 and sell_count >= 2:
+        return "Mixed"
+    if sell_count > buy_count:
+        return "Avoid"
+    return "Watch"
+
+
+def build_stock_shortlist_table(all_recs):
     if all_recs.empty:
         return pd.DataFrame()
 
     ranked = all_recs.copy()
+    ranked["Family"] = ranked["Agent"].map(AGENT_FAMILIES).fillna("other")
     ranked["AgentRankPct"] = ranked.groupby("Agent")["Score"].transform(_percentile_rank_desc)
-
-    agent_quality = {}
-    if summary_df is not None and not summary_df.empty and "Agent" in summary_df.columns:
-        quality_base = summary_df[["Agent", "AvgStrategyReturnPct"]].drop_duplicates("Agent").copy()
-        quality_base["AgentQualityPct"] = _percentile_rank_desc(quality_base["AvgStrategyReturnPct"])
-        agent_quality = quality_base.set_index("Agent")["AgentQualityPct"].to_dict()
 
     rows = []
     for stock, group in ranked.groupby("Stock"):
@@ -314,24 +351,24 @@ def build_stock_ranking_table(all_recs, summary_df):
         buy_count = int(len(buy_group))
         sell_count = int(len(sell_group))
         hold_count = int(len(hold_group))
+        net_bias = buy_count - sell_count
+        conflict_count = min(buy_count, sell_count)
         buy_support_pct = buy_count / total_agents if total_agents else 0.0
         sell_support_pct = sell_count / total_agents if total_agents else 0.0
         mean_score = float(group["Score"].dropna().mean()) if group["Score"].notna().any() else float("nan")
         buy_mean_score = float(buy_group["Score"].dropna().mean()) if buy_group["Score"].notna().any() else float("nan")
         mean_agent_rank_pct = float(group["AgentRankPct"].mean()) if group["AgentRankPct"].notna().any() else float("nan")
         buy_rank_pct = float(buy_group["AgentRankPct"].mean()) if buy_group["AgentRankPct"].notna().any() else 0.0
-
-        supporting_agents = ", ".join(buy_group["Agent"].tolist())
-        opposing_agents = ", ".join(sell_group["Agent"].tolist())
-        agent_quality_values = [agent_quality[a] for a in buy_group["Agent"] if a in agent_quality and pd.notna(agent_quality[a])]
-        support_quality_pct = float(np.mean(agent_quality_values)) if agent_quality_values else 0.0
-
-        final_score = 100.0 * (
-            (0.45 * buy_support_pct)
-            - (0.30 * sell_support_pct)
-            + (0.15 * buy_rank_pct)
-            + (0.10 * support_quality_pct)
-        )
+        trend_buy_count = _support_count(group, "trend", "Buy")
+        mean_reversion_buy_count = _support_count(group, "mean_reversion", "Buy")
+        volume_buy_count = _support_count(group, "volume_confirmation", "Buy")
+        breakout_buy_count = _support_count(group, "breakout", "Buy")
+        buy_family_breadth = int(buy_group["Family"].nunique()) if not buy_group.empty else 0
+        support_families = _join_agents(buy_group["Family"].drop_duplicates().tolist())
+        supporting_agents = _join_agents(buy_group["Agent"].tolist())
+        opposing_agents = _join_agents(sell_group["Agent"].tolist())
+        best_buy_agent = buy_group.sort_values("Score", ascending=False, na_position="last").iloc[0]["Agent"] if not buy_group.empty else None
+        best_buy_score = buy_group.sort_values("Score", ascending=False, na_position="last").iloc[0]["Score"] if not buy_group.empty else float("nan")
 
         if buy_count > sell_count:
             consensus_recommendation = "Buy"
@@ -340,35 +377,59 @@ def build_stock_ranking_table(all_recs, summary_df):
         else:
             consensus_recommendation = "Hold"
 
+        shortlist_tier = _shortlist_tier(
+            buy_count=buy_count,
+            sell_count=sell_count,
+            trend_buy_count=trend_buy_count,
+            volume_buy_count=volume_buy_count,
+            buy_family_breadth=buy_family_breadth,
+        )
+
         rows.append(
             {
                 "Stock": stock,
-                "FinalScore": final_score,
+                "ShortlistTier": shortlist_tier,
                 "ConsensusRecommendation": consensus_recommendation,
                 "TotalAgents": total_agents,
                 "BuyCount": buy_count,
                 "SellCount": sell_count,
                 "HoldCount": hold_count,
+                "NetBias": net_bias,
+                "ConflictCount": conflict_count,
                 "BuySupportPct": buy_support_pct,
                 "SellSupportPct": sell_support_pct,
+                "TrendBuyCount": trend_buy_count,
+                "MeanReversionBuyCount": mean_reversion_buy_count,
+                "VolumeBuyCount": volume_buy_count,
+                "BreakoutBuyCount": breakout_buy_count,
+                "BuyFamilyBreadth": buy_family_breadth,
+                "SupportFamilies": support_families,
                 "MeanScore": mean_score,
                 "BuyMeanScore": buy_mean_score,
                 "MeanAgentRankPct": mean_agent_rank_pct,
                 "BuyAgentRankPct": buy_rank_pct,
-                "SupportingAgentQualityPct": support_quality_pct,
                 "BestAgent": ordered.iloc[0]["Agent"],
                 "BestAgentScore": ordered.iloc[0]["Score"],
+                "BestBuyAgent": best_buy_agent,
+                "BestBuyScore": best_buy_score,
                 "SupportingAgents": supporting_agents,
                 "OpposingAgents": opposing_agents,
             }
         )
 
-    ranking = pd.DataFrame(rows)
-    return ranking.sort_values(
-        ["FinalScore", "BuyCount", "BuyAgentRankPct", "MeanScore"],
-        ascending=[False, False, False, False],
+    shortlist = pd.DataFrame(rows)
+    tier_order = {"TierA": 0, "TierB": 1, "TierC": 2, "Watch": 3, "Mixed": 4, "Avoid": 5}
+    shortlist["TierOrder"] = shortlist["ShortlistTier"].map(tier_order).fillna(99)
+    shortlist = shortlist.sort_values(
+        ["TierOrder", "BuyCount", "ConflictCount", "BuyFamilyBreadth", "BuyAgentRankPct", "MeanScore"],
+        ascending=[True, False, True, False, False, False],
         na_position="last",
-    ).reset_index(drop=True)
+    ).drop(columns=["TierOrder"]).reset_index(drop=True)
+    return shortlist
+
+
+def build_stock_ranking_table(all_recs, summary_df=None):
+    return build_stock_shortlist_table(all_recs)
 
 
 def resolve_output_path(path_str, timestamp_output):
@@ -407,7 +468,14 @@ def main(argv=None):
     parser.add_argument("--summary-output", type=str, default="technical_agent_summary.csv", help="CSV path for per-agent summary")
     parser.add_argument("--recommendations-output", type=str, default="technical_agent_recommendations.csv", help="CSV path for combined per-agent recommendations")
     parser.add_argument("--consensus-output", type=str, default="technical_agent_consensus.csv", help="CSV path for grouped stock consensus")
-    parser.add_argument("--ranking-output", type=str, default="technical_agent_stock_ranking.csv", help="CSV path for ranked stock shortlist")
+    parser.add_argument(
+        "--shortlist-output",
+        "--ranking-output",
+        dest="shortlist_output",
+        type=str,
+        default="technical_agent_shortlist.csv",
+        help="CSV path for tiered stock shortlist",
+    )
     parser.add_argument("--timestamp-output", action="store_true", help="Append timestamp to outputs unless '{ts}' is present")
 
     args = parser.parse_args(argv)
@@ -460,12 +528,12 @@ def main(argv=None):
 
     all_recs = pd.concat(recommendation_frames, ignore_index=True) if recommendation_frames else pd.DataFrame()
     consensus_df = build_consensus_table(all_recs)
-    ranking_df = build_stock_ranking_table(all_recs, summary_df)
+    shortlist_df = build_stock_shortlist_table(all_recs)
 
     summary_out = resolve_output_path(args.summary_output, args.timestamp_output)
     recs_out = resolve_output_path(args.recommendations_output, args.timestamp_output)
     consensus_out = resolve_output_path(args.consensus_output, args.timestamp_output)
-    ranking_out = resolve_output_path(args.ranking_output, args.timestamp_output)
+    shortlist_out = resolve_output_path(args.shortlist_output, args.timestamp_output)
 
     if summary_out and not summary_df.empty:
         summary_df.to_csv(summary_out, index=False)
@@ -473,8 +541,8 @@ def main(argv=None):
         all_recs.to_csv(recs_out, index=False)
     if consensus_out and not consensus_df.empty:
         consensus_df.to_csv(consensus_out, index=False)
-    if ranking_out and not ranking_df.empty:
-        ranking_df.to_csv(ranking_out, index=False)
+    if shortlist_out and not shortlist_df.empty:
+        shortlist_df.to_csv(shortlist_out, index=False)
 
     print("\nAgent Summary:")
     print(summary_df if not summary_df.empty else "No agent summaries produced.")
@@ -482,8 +550,8 @@ def main(argv=None):
     print("\nConsensus:")
     print(consensus_df if not consensus_df.empty else "No consensus rows produced.")
 
-    print("\nStock Ranking:")
-    print(ranking_df if not ranking_df.empty else "No ranking rows produced.")
+    print("\nShortlist:")
+    print(shortlist_df if not shortlist_df.empty else "No shortlist rows produced.")
 
     if failed_agents:
         print("\nFailed Agents:")
@@ -496,14 +564,15 @@ def main(argv=None):
         print(f"Wrote recommendations to {recs_out}")
     if consensus_out and not consensus_df.empty:
         print(f"Wrote consensus to {consensus_out}")
-    if ranking_out and not ranking_df.empty:
-        print(f"Wrote ranking to {ranking_out}")
+    if shortlist_out and not shortlist_df.empty:
+        print(f"Wrote shortlist to {shortlist_out}")
 
     return {
         "summary": summary_df,
         "recommendations": all_recs,
         "consensus": consensus_df,
-        "ranking": ranking_df,
+        "shortlist": shortlist_df,
+        "ranking": shortlist_df,
         "failed_agents": failed_agents,
     }
 
