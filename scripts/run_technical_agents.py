@@ -301,6 +301,103 @@ def build_consensus_table(all_recs):
     return consensus.sort_values(["BuyCount", "MeanScore"], ascending=[False, False], na_position="last").reset_index(drop=True)
 
 
+def build_family_summary_table(all_recs, summary_df):
+    if all_recs.empty:
+        return pd.DataFrame()
+
+    recs = all_recs.copy()
+    recs["Family"] = recs["Agent"].map(AGENT_FAMILIES).fillna("other")
+
+    summary_by_agent = pd.DataFrame()
+    if summary_df is not None and not summary_df.empty and "Agent" in summary_df.columns:
+        summary_by_agent = summary_df.copy()
+        summary_by_agent["Family"] = summary_by_agent["Agent"].map(AGENT_FAMILIES).fillna("other")
+
+    rows = []
+    family_order = ["trend", "mean_reversion", "volume_confirmation", "breakout", "other"]
+    families = [f for f in family_order if f in recs["Family"].unique()]
+
+    for family in families:
+        group = recs[recs["Family"] == family]
+        ordered_group = group.sort_values("Score", ascending=False, na_position="last")
+        buy_group = group[group["Recommendation"] == "Buy"]
+        sell_group = group[group["Recommendation"] == "Sell"]
+        hold_group = group[group["Recommendation"] == "Hold"]
+        family_agents = group["Agent"].drop_duplicates().tolist()
+
+        family_summary = summary_by_agent[summary_by_agent["Family"] == family] if not summary_by_agent.empty else pd.DataFrame()
+        if family_summary.empty:
+            avg_strategy_return = float("nan")
+            median_strategy_return = float("nan")
+            avg_agent_score = float("nan")
+            top_agent = None
+            top_agent_return = float("nan")
+        else:
+            avg_strategy_return = float(family_summary["AvgStrategyReturnPct"].mean())
+            median_strategy_return = float(family_summary["AvgStrategyReturnPct"].median())
+            avg_agent_score = float(family_summary["AvgScore"].mean())
+            top_agent_row = family_summary.sort_values("AvgStrategyReturnPct", ascending=False, na_position="last").iloc[0]
+            top_agent = top_agent_row["Agent"]
+            top_agent_return = top_agent_row["AvgStrategyReturnPct"]
+
+        if buy_group.empty:
+            top_buy_stock = None
+            top_buy_stock_count = 0
+            top_buy_stock_mean_score = float("nan")
+        else:
+            buy_stock_summary = (
+                buy_group.groupby("Stock")
+                .agg(
+                    BuyCount=("Stock", "size"),
+                    MeanScore=("Score", "mean"),
+                )
+                .sort_values(["BuyCount", "MeanScore"], ascending=[False, False], na_position="last")
+                .reset_index()
+            )
+            top_buy_stock = buy_stock_summary.iloc[0]["Stock"]
+            top_buy_stock_count = int(buy_stock_summary.iloc[0]["BuyCount"])
+            top_buy_stock_mean_score = float(buy_stock_summary.iloc[0]["MeanScore"])
+
+        total_signals = len(group)
+        buy_count = int(len(buy_group))
+        sell_count = int(len(sell_group))
+        hold_count = int(len(hold_group))
+
+        rows.append(
+            {
+                "Family": family,
+                "AgentCount": int(len(family_agents)),
+                "Agents": _join_agents(family_agents),
+                "StocksCovered": int(group["Stock"].nunique()),
+                "TotalSignals": total_signals,
+                "BuySignals": buy_count,
+                "SellSignals": sell_count,
+                "HoldSignals": hold_count,
+                "NetSignals": buy_count - sell_count,
+                "BuySignalPct": buy_count / total_signals if total_signals else 0.0,
+                "SellSignalPct": sell_count / total_signals if total_signals else 0.0,
+                "MeanScore": float(group["Score"].mean()) if group["Score"].notna().any() else float("nan"),
+                "BestAgent": ordered_group.iloc[0]["Agent"],
+                "BestAgentScore": ordered_group.iloc[0]["Score"],
+                "AvgAgentStrategyReturnPct": avg_strategy_return,
+                "MedianAgentStrategyReturnPct": median_strategy_return,
+                "AvgAgentScore": avg_agent_score,
+                "TopAgentByReturn": top_agent,
+                "TopAgentStrategyReturnPct": top_agent_return,
+                "TopBuyStock": top_buy_stock,
+                "TopBuyStockCount": top_buy_stock_count,
+                "TopBuyStockMeanScore": top_buy_stock_mean_score,
+            }
+        )
+
+    family_summary_df = pd.DataFrame(rows)
+    return family_summary_df.sort_values(
+        ["NetSignals", "BuySignalPct", "AvgAgentStrategyReturnPct"],
+        ascending=[False, False, False],
+        na_position="last",
+    ).reset_index(drop=True)
+
+
 def _percentile_rank_desc(series):
     if len(series) <= 1:
         return pd.Series(1.0, index=series.index, dtype=float)
@@ -468,6 +565,7 @@ def main(argv=None):
     parser.add_argument("--summary-output", type=str, default="technical_agent_summary.csv", help="CSV path for per-agent summary")
     parser.add_argument("--recommendations-output", type=str, default="technical_agent_recommendations.csv", help="CSV path for combined per-agent recommendations")
     parser.add_argument("--consensus-output", type=str, default="technical_agent_consensus.csv", help="CSV path for grouped stock consensus")
+    parser.add_argument("--family-summary-output", type=str, default="technical_agent_family_summary.csv", help="CSV path for family-level summary")
     parser.add_argument(
         "--shortlist-output",
         "--ranking-output",
@@ -528,11 +626,13 @@ def main(argv=None):
 
     all_recs = pd.concat(recommendation_frames, ignore_index=True) if recommendation_frames else pd.DataFrame()
     consensus_df = build_consensus_table(all_recs)
+    family_summary_df = build_family_summary_table(all_recs, summary_df)
     shortlist_df = build_stock_shortlist_table(all_recs)
 
     summary_out = resolve_output_path(args.summary_output, args.timestamp_output)
     recs_out = resolve_output_path(args.recommendations_output, args.timestamp_output)
     consensus_out = resolve_output_path(args.consensus_output, args.timestamp_output)
+    family_summary_out = resolve_output_path(args.family_summary_output, args.timestamp_output)
     shortlist_out = resolve_output_path(args.shortlist_output, args.timestamp_output)
 
     if summary_out and not summary_df.empty:
@@ -541,6 +641,8 @@ def main(argv=None):
         all_recs.to_csv(recs_out, index=False)
     if consensus_out and not consensus_df.empty:
         consensus_df.to_csv(consensus_out, index=False)
+    if family_summary_out and not family_summary_df.empty:
+        family_summary_df.to_csv(family_summary_out, index=False)
     if shortlist_out and not shortlist_df.empty:
         shortlist_df.to_csv(shortlist_out, index=False)
 
@@ -549,6 +651,9 @@ def main(argv=None):
 
     print("\nConsensus:")
     print(consensus_df if not consensus_df.empty else "No consensus rows produced.")
+
+    print("\nFamily Summary:")
+    print(family_summary_df if not family_summary_df.empty else "No family summary rows produced.")
 
     print("\nShortlist:")
     print(shortlist_df if not shortlist_df.empty else "No shortlist rows produced.")
@@ -564,6 +669,8 @@ def main(argv=None):
         print(f"Wrote recommendations to {recs_out}")
     if consensus_out and not consensus_df.empty:
         print(f"Wrote consensus to {consensus_out}")
+    if family_summary_out and not family_summary_df.empty:
+        print(f"Wrote family summary to {family_summary_out}")
     if shortlist_out and not shortlist_df.empty:
         print(f"Wrote shortlist to {shortlist_out}")
 
@@ -571,6 +678,7 @@ def main(argv=None):
         "summary": summary_df,
         "recommendations": all_recs,
         "consensus": consensus_df,
+        "family_summary": family_summary_df,
         "shortlist": shortlist_df,
         "ranking": shortlist_df,
         "failed_agents": failed_agents,

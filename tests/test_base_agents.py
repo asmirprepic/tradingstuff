@@ -35,7 +35,7 @@ from agents.technical.rsi_agent import RSIAgent
 from agents.technical.supertrend_agent import SupertrendAgent
 from agents.technical.volume_price_divergence_agent import VolumePriceDivergenceAgent
 from agents.technical.volume_weighted_average_price_agent import VWAPAgent
-from scripts.run_technical_agents import build_stock_shortlist_table
+from scripts.run_technical_agents import build_family_summary_table, build_stock_shortlist_table
 
 
 def make_market_data(stock="AAA", periods=60):
@@ -1249,6 +1249,43 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(shortlist.loc[1, "ConflictCount"], 1)
         self.assertEqual(shortlist.loc[0, "SupportFamilies"], "trend, volume_confirmation, mean_reversion")
         self.assertIn("BuyAgentRankPct", shortlist.columns)
+
+    def test_build_family_summary_table_rolls_up_agents_and_top_buy_stock(self):
+        all_recs = pd.DataFrame(
+            [
+                {"Agent": "momentum", "Stock": "AAA", "Recommendation": "Buy", "Score": 0.90},
+                {"Agent": "supertrend", "Stock": "AAA", "Recommendation": "Buy", "Score": 0.85},
+                {"Agent": "rsi", "Stock": "AAA", "Recommendation": "Buy", "Score": 0.70},
+                {"Agent": "vwap", "Stock": "AAA", "Recommendation": "Hold", "Score": 0.10},
+                {"Agent": "momentum", "Stock": "BBB", "Recommendation": "Sell", "Score": 0.20},
+                {"Agent": "supertrend", "Stock": "BBB", "Recommendation": "Buy", "Score": 0.40},
+                {"Agent": "rsi", "Stock": "BBB", "Recommendation": "Hold", "Score": 0.05},
+                {"Agent": "vwap", "Stock": "BBB", "Recommendation": "Buy", "Score": 0.30},
+            ]
+        )
+        summary_df = pd.DataFrame(
+            [
+                {"Agent": "momentum", "AvgStrategyReturnPct": 12.0, "AvgScore": 0.55},
+                {"Agent": "supertrend", "AvgStrategyReturnPct": 8.0, "AvgScore": 0.60},
+                {"Agent": "rsi", "AvgStrategyReturnPct": 3.0, "AvgScore": 0.25},
+                {"Agent": "vwap", "AvgStrategyReturnPct": 6.0, "AvgScore": 0.20},
+            ]
+        )
+
+        family_summary = build_family_summary_table(all_recs, summary_df)
+        trend_row = family_summary[family_summary["Family"] == "trend"].iloc[0]
+        reversion_row = family_summary[family_summary["Family"] == "mean_reversion"].iloc[0]
+
+        self.assertEqual(int(trend_row["AgentCount"]), 2)
+        self.assertEqual(trend_row["Agents"], "momentum, supertrend")
+        self.assertEqual(int(trend_row["BuySignals"]), 3)
+        self.assertEqual(int(trend_row["SellSignals"]), 1)
+        self.assertEqual(trend_row["TopBuyStock"], "AAA")
+        self.assertEqual(int(trend_row["TopBuyStockCount"]), 2)
+        self.assertEqual(trend_row["TopAgentByReturn"], "momentum")
+        self.assertAlmostEqual(float(trend_row["AvgAgentStrategyReturnPct"]), 10.0)
+        self.assertEqual(reversion_row["Family"], "mean_reversion")
+        self.assertEqual(int(reversion_row["BuySignals"]), 1)
 
 
 if __name__ == "__main__":
