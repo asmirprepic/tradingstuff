@@ -45,6 +45,19 @@ class LSTMAnomalyAgent(TradingAgent):
         self.thresholds = {}
         self.train_data = {}
 
+    def _reconstruction_error(self, model, X_input, mu, sigma):
+        if len(X_input) == 0:
+            return np.asarray([], dtype=float)
+
+        X_norm = (X_input - mu) / sigma
+        X_reconstructed = model.predict(X_norm, verbose=0)
+        return np.mean(np.power(X_norm - X_reconstructed, 2), axis=(1, 2))
+
+    def _position_from_error(self, reconstruction_error, threshold):
+        anomaly = reconstruction_error > threshold
+        position = np.where(anomaly, self.position_on_anomaly, 0)
+        return anomaly, position
+
     def _require_tensorflow(self):
         if Model is None:
             raise ModuleNotFoundError(
@@ -175,11 +188,13 @@ class LSTMAnomalyAgent(TradingAgent):
         if mode == "backtest":
             X_pred = train_data["X_test"]
             index_used = train_data["index_test"]
+            X_prev = train_data["X_train"][-1:] if len(train_data["X_train"]) > 0 else np.asarray([], dtype=float)
         elif mode == "live":
             features = self.feature_engineering(stock)
             X_full, feature_index = self.build_sequence_dataset(features)
             X_pred = X_full[-1:].copy()
             index_used = pd.Index([feature_index[-1]])
+            X_prev = X_full[-2:-1] if len(X_full) > 1 else np.asarray([], dtype=float)
         else:
             raise ValueError("mode must be 'backtest' or 'live'")
 
@@ -195,12 +210,16 @@ class LSTMAnomalyAgent(TradingAgent):
                 ]
             )
 
-        X_norm = (X_pred - mu) / sigma
-        X_reconstructed = model.predict(X_norm, verbose=0)
-        reconstruction_error = np.mean(np.power(X_norm - X_reconstructed, 2), axis=(1, 2))
-        anomaly = reconstruction_error > threshold
+        reconstruction_error = self._reconstruction_error(model, X_pred, mu, sigma)
+        anomaly, position = self._position_from_error(reconstruction_error, threshold)
         strength = reconstruction_error / threshold if threshold > 0 else reconstruction_error
-        position = np.where(anomaly, self.position_on_anomaly, 0)
+
+        previous_position = 0
+        if len(X_prev) > 0:
+            previous_error = self._reconstruction_error(model, X_prev, mu, sigma)
+            _, previous_position_array = self._position_from_error(previous_error, threshold)
+            if len(previous_position_array) > 0:
+                previous_position = int(previous_position_array[-1])
 
         signals = pd.DataFrame(index=index_used)
         signals["Anomaly"] = anomaly
@@ -208,8 +227,11 @@ class LSTMAnomalyAgent(TradingAgent):
         signals["SignalStrength"] = strength
         signals["Position"] = position
         signals["Signal"] = 0
-        signals.loc[signals["Position"] > signals["Position"].shift(1), "Signal"] = 1
-        signals.loc[signals["Position"] < signals["Position"].shift(1), "Signal"] = -1
+        prior_positions = signals["Position"].shift(1)
+        if len(prior_positions) > 0:
+            prior_positions.iloc[0] = previous_position
+        signals.loc[signals["Position"] > prior_positions, "Signal"] = 1
+        signals.loc[signals["Position"] < prior_positions, "Signal"] = -1
 
         close = self.data[(stock, "Close")].reindex(index_used)
         signals["return"] = np.log(close / close.shift(1))

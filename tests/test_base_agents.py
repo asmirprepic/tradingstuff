@@ -8,6 +8,7 @@ from agents.base_agents.ml_trading_agent import MLBasedAgent
 from agents.base_agents.nn_based_agent import NNBasedAgent
 from agents.base_agents.sequential_based import SequentialNNAgent
 from agents.ml_based.anomaly.autoencoder_agent import AutoencoderAgent
+from agents.ml_based.anomaly.lstm_anomaly_agent import LSTMAnomalyAgent
 from agents.ml_based.deep_learning.cnn_agent import CNNAgent
 from agents.ml_based.clustering.clustering_agent import ClusteringFilteredKNNAgent
 from agents.ml_based.deep_learning.lstm_attention_agent import LSTMAttentionAgent
@@ -80,6 +81,11 @@ class DummyProbClassifier:
     def predict_proba(self, X):
         prob_up = self._prob_up[: len(X)]
         return np.column_stack([1.0 - prob_up, prob_up])
+
+
+class DummyReconstructionModel:
+    def predict(self, X, verbose=0):
+        return np.zeros_like(X)
 
 
 class DummyMLAgent(MLBasedAgent):
@@ -695,6 +701,30 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("AAA", agent.signal_data)
         self.assertIn("AAA", agent.returns_data)
         self.assertIn("SignalStrength", agent.signal_data["AAA"].columns)
+
+    def test_lstm_anomaly_agent_marks_first_test_row_signal_from_prior_position(self):
+        data = make_market_data(periods=8)
+        stock = "AAA"
+        agent = LSTMAnomalyAgent(data, sequence_length=2, anomaly_threshold_percentile=95, position_on_anomaly=-1)
+
+        test_index = pd.Index(data[stock].index[-2:])
+        agent.models[stock] = DummyReconstructionModel()
+        agent.thresholds[stock] = 0.5
+        agent.train_data[stock] = {
+            "X_train": np.zeros((3, 1, 1), dtype=float),
+            "X_test": np.array([[[1.0]], [[0.0]]], dtype=float),
+            "index_train": pd.Index(data[stock].index[3:6]),
+            "index_test": test_index,
+            "mu": np.zeros((1, 1), dtype=float),
+            "sigma": np.ones((1, 1), dtype=float),
+            "percentile": 95,
+        }
+
+        signals = agent.predict_signals(stock, mode="backtest")
+
+        self.assertListEqual(signals.index.tolist(), test_index.tolist())
+        self.assertListEqual(signals["Position"].tolist(), [-1, 0])
+        self.assertListEqual(signals["Signal"].tolist(), [-1, 1])
 
     def test_naive_bayes_agent_feature_contract_matches_base(self):
         data = make_market_data(periods=20)
