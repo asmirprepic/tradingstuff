@@ -49,6 +49,22 @@ python -m scripts.run_technical_agents --agents all --tickers-file tickers.txt -
 - `technical_agent_summary.csv`: one row per agent with average returns, profitable-stock counts, and top pick.
 - `technical_agent_recommendations.csv`: combined recommendations for each agent/stock pair.
 - `technical_agent_consensus.csv`: grouped stock-level view showing buy/sell/hold counts across agents.
+- `technical_agent_family_summary.csv`: grouped rollup by strategy family.
+- `technical_agent_shortlist.csv`: tiered shortlist with family counts and conflict flags.
+
+### `technical_dashboard.py`
+
+Build a self-contained HTML dashboard from the technical-agent CSV outputs.
+
+**Usage:**
+
+```bash
+python -m scripts.technical_dashboard --output outputs/dashboard/technical_dashboard.html
+```
+
+**Output:**
+
+- `outputs/dashboard/technical_dashboard.html`: interactive local report with agent summary, family summary, shortlist filters, and consensus tables.
 
 ### `run_recommendations.py`
 
