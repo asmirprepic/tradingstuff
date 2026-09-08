@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -529,11 +530,11 @@ def build_stock_ranking_table(all_recs, summary_df=None):
     return build_stock_shortlist_table(all_recs)
 
 
-def resolve_output_path(path_str, timestamp_output):
+def resolve_output_path(path_str, timestamp_output, timestamp=None):
     if not path_str:
         return None
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
     if "{ts}" in path_str:
         return path_str.replace("{ts}", timestamp)
 
@@ -544,6 +545,43 @@ def resolve_output_path(path_str, timestamp_output):
         return str(p.with_name(f"{stem}_{timestamp}{suffix}"))
 
     return path_str
+
+
+def write_run_manifest(path, run_id, args, tickers, selected_agents, output_paths, row_counts, failed_agents):
+    manifest_path = Path(path).resolve()
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "data": {
+            "source": "synthetic" if args.use_synthetic else "market",
+            "tickers": list(tickers),
+            "ticker_count": len(tickers),
+            "start": args.start,
+            "end": args.end,
+            "lookback_days": args.lookback_days,
+            "interval": args.interval,
+            "synthetic_periods": args.synthetic_periods if args.use_synthetic else None,
+        },
+        "configuration": {
+            "agents": list(selected_agents),
+            "persistence": args.persistence,
+            "top_n_per_agent": args.top_n_per_agent,
+            "timestamp_output": args.timestamp_output,
+        },
+        "outputs": {
+            name: str(Path(output_path).resolve()) if output_path else None
+            for name, output_path in output_paths.items()
+        },
+        "row_counts": row_counts,
+        "failed_agents": [
+            {"agent": agent_name, "error": error}
+            for agent_name, error in failed_agents
+        ],
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return manifest_path, manifest
 
 
 def main(argv=None):
@@ -574,6 +612,7 @@ def main(argv=None):
         default="technical_agent_shortlist.csv",
         help="CSV path for tiered stock shortlist",
     )
+    parser.add_argument("--manifest-output", type=str, default="technical_agent_run_manifest.json", help="JSON path for run metadata and output paths")
     parser.add_argument("--timestamp-output", action="store_true", help="Append timestamp to outputs unless '{ts}' is present")
 
     args = parser.parse_args(argv)
@@ -629,11 +668,13 @@ def main(argv=None):
     family_summary_df = build_family_summary_table(all_recs, summary_df)
     shortlist_df = build_stock_shortlist_table(all_recs)
 
-    summary_out = resolve_output_path(args.summary_output, args.timestamp_output)
-    recs_out = resolve_output_path(args.recommendations_output, args.timestamp_output)
-    consensus_out = resolve_output_path(args.consensus_output, args.timestamp_output)
-    family_summary_out = resolve_output_path(args.family_summary_output, args.timestamp_output)
-    shortlist_out = resolve_output_path(args.shortlist_output, args.timestamp_output)
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    summary_out = resolve_output_path(args.summary_output, args.timestamp_output, run_id)
+    recs_out = resolve_output_path(args.recommendations_output, args.timestamp_output, run_id)
+    consensus_out = resolve_output_path(args.consensus_output, args.timestamp_output, run_id)
+    family_summary_out = resolve_output_path(args.family_summary_output, args.timestamp_output, run_id)
+    shortlist_out = resolve_output_path(args.shortlist_output, args.timestamp_output, run_id)
+    manifest_out = resolve_output_path(args.manifest_output, args.timestamp_output, run_id)
 
     if summary_out and not summary_df.empty:
         summary_df.to_csv(summary_out, index=False)
@@ -645,6 +686,33 @@ def main(argv=None):
         family_summary_df.to_csv(family_summary_out, index=False)
     if shortlist_out and not shortlist_df.empty:
         shortlist_df.to_csv(shortlist_out, index=False)
+
+    output_paths = {
+        "summary": summary_out if not summary_df.empty else None,
+        "recommendations": recs_out if not all_recs.empty else None,
+        "consensus": consensus_out if not consensus_df.empty else None,
+        "family_summary": family_summary_out if not family_summary_df.empty else None,
+        "shortlist": shortlist_out if not shortlist_df.empty else None,
+    }
+    manifest_path = None
+    manifest = None
+    if manifest_out:
+        manifest_path, manifest = write_run_manifest(
+            manifest_out,
+            run_id,
+            args,
+            tickers,
+            selected_agents,
+            output_paths,
+            {
+                "summary": len(summary_df),
+                "recommendations": len(all_recs),
+                "consensus": len(consensus_df),
+                "family_summary": len(family_summary_df),
+                "shortlist": len(shortlist_df),
+            },
+            failed_agents,
+        )
 
     print("\nAgent Summary:")
     print(summary_df if not summary_df.empty else "No agent summaries produced.")
@@ -673,6 +741,8 @@ def main(argv=None):
         print(f"Wrote family summary to {family_summary_out}")
     if shortlist_out and not shortlist_df.empty:
         print(f"Wrote shortlist to {shortlist_out}")
+    if manifest_path:
+        print(f"Wrote run manifest to {manifest_path}")
 
     return {
         "summary": summary_df,
@@ -681,6 +751,8 @@ def main(argv=None):
         "family_summary": family_summary_df,
         "shortlist": shortlist_df,
         "ranking": shortlist_df,
+        "manifest": manifest,
+        "manifest_path": manifest_path,
         "failed_agents": failed_agents,
     }
 

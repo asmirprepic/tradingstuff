@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Technical Agent Dashboard</title>
+  <style>
+    :root {
+      --bg: #f4f1ea;
+      --panel: #ffffff;
+      --panel-alt: #fbfaf7;
+      --text: #1f2933;
+      --muted: #667085;
+      --line: #d8d2c7;
+      --accent: #0f766e;
+      --accent-soft: #d9f0ed;
+      --positive: #166534;
+      --positive-soft: #dcfce7;
+      --negative: #991b1b;
+      --negative-soft: #fee2e2;
+      --warning: #92400e;
+      --warning-soft: #fef3c7;
+      --shadow: 0 10px 30px rgba(31, 41, 51, 0.08);
+      --radius: 18px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.08), transparent 30%),
+        radial-gradient(circle at top right, rgba(22, 101, 52, 0.08), transparent 28%),
+        var(--bg);
+    }
+    .shell { max-width: 1600px; margin: 0 auto; padding: 28px 22px 48px; }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.6fr 1fr;
+      gap: 18px;
+      align-items: stretch;
+      margin-bottom: 18px;
+    }
+    .hero-card, .panel, .metric-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    .hero-card {
+      padding: 26px;
+      background: linear-gradient(135deg, rgba(15, 118, 110, 0.08), rgba(255, 255, 255, 0.96) 42%);
+    }
+    h1, h2, h3 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      letter-spacing: -0.02em;
+    }
+    h1 { font-size: 34px; margin-bottom: 8px; }
+    .subtitle { color: var(--muted); line-height: 1.5; }
+    .hero-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(15, 118, 110, 0.08);
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .metric-card { padding: 16px; }
+    .metric-title { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .metric-value { margin-top: 8px; font-size: 28px; font-weight: 800; }
+    .card-subtitle { margin-top: 6px; font-size: 13px; color: var(--muted); }
+    .positive .metric-value { color: var(--positive); }
+    .negative .metric-value { color: var(--negative); }
+    .panel { padding: 18px; margin-bottom: 18px; }
+    .panel h2 { font-size: 22px; margin-bottom: 10px; }
+    .panel-subtitle { color: var(--muted); margin-bottom: 14px; line-height: 1.4; }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      background: var(--panel);
+    }
+    .data-table th, .data-table td {
+      border-bottom: 1px solid #ebe5da;
+      padding: 10px 10px;
+      vertical-align: top;
+      text-align: left;
+      white-space: nowrap;
+    }
+    .data-table th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--panel-alt);
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .table-scroll {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--panel);
+      max-height: 700px;
+    }
+    .num { text-align: right !important; font-variant-numeric: tabular-nums; }
+    .empty-state {
+      padding: 20px;
+      color: var(--muted);
+      font-style: italic;
+    }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .toolbar input, .toolbar select {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font: inherit;
+      background: var(--panel);
+      min-width: 240px;
+    }
+    .tier-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .tier-tiera { background: var(--positive-soft); color: var(--positive); }
+    .tier-tierb { background: #dbeafe; color: #1d4ed8; }
+    .tier-tierc { background: var(--warning-soft); color: var(--warning); }
+    .tier-watch { background: #e5e7eb; color: #374151; }
+    .tier-mixed { background: #fce7f3; color: #be185d; }
+    .tier-avoid { background: var(--negative-soft); color: var(--negative); }
+    .bar-wrap {
+      width: 120px;
+      height: 10px;
+      background: #ece7dc;
+      border-radius: 999px;
+      overflow: hidden;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    .bar {
+      height: 100%;
+      border-radius: inherit;
+    }
+    .bar.buy { background: var(--positive); }
+    .bar.sell { background: var(--negative); }
+    .bar-label { color: var(--muted); font-size: 12px; }
+    .section-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+    @media (max-width: 1200px) {
+      .hero { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 900px) {
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .toolbar input, .toolbar select { min-width: 100%; }
+    }
+    @media (max-width: 560px) {
+      .metrics { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="hero-card">
+        <h1>Technical Agent Dashboard</h1>
+        <div class="subtitle">
+          A compact view across agent summaries, family rollups, consensus output, and the shortlist screen.
+          Use the shortlist filter to inspect the 700-ticker universe without reading raw CSVs.
+        </div>
+        <div class="hero-meta">
+          <span class="pill">Generated 2026-09-08 23:54:17</span>
+          <span class="pill">Run 20260908_235355</span>
+          <span class="pill">2 shortlist rows</span>
+          <span class="pill">0 Tier A picks</span>
+        </div>
+      </div>
+      <div class="hero-card">
+        <h3>Interpretation</h3>
+        <div class="subtitle" style="margin-top: 10px;">
+          The shortlist is tiered, not score-blended. That keeps the output readable when many agents and many tickers are involved.
+          Families are grouped as trend, mean reversion, volume confirmation, and breakout.
+        </div>
+      </div>
+    </section>
+
+    <section class="metrics">
+      
+    <div class="metric-card metric-neutral">
+      <div class="metric-title">Agents</div>
+      <div class="metric-value">2</div>
+      <div class="card-subtitle">Per-agent summary rows</div>
+    </div>
+    
+    <div class="metric-card metric-neutral">
+      <div class="metric-title">Families</div>
+      <div class="metric-value">2</div>
+      <div class="card-subtitle">Trend, mean reversion, volume, breakout</div>
+    </div>
+    
+    <div class="metric-card metric-neutral">
+      <div class="metric-title">Shortlist Rows</div>
+      <div class="metric-value">2</div>
+      <div class="card-subtitle">Screened stocks</div>
+    </div>
+    
+    <div class="metric-card metric-positive">
+      <div class="metric-title">Tier A</div>
+      <div class="metric-value">0</div>
+      <div class="card-subtitle">Highest conviction tier</div>
+    </div>
+    
+    <div class="metric-card metric-positive">
+      <div class="metric-title">Buy Consensus</div>
+      <div class="metric-value">0</div>
+      <div class="card-subtitle">Shortlist buy recommendations</div>
+    </div>
+    
+    <div class="metric-card metric-negative">
+      <div class="metric-title">Sell Consensus</div>
+      <div class="metric-value">1</div>
+      <div class="card-subtitle">Shortlist sell recommendations</div>
+    </div>
+    
+    </section>
+
+    <div class="section-grid">
+      <section class="panel">
+        <h2>Agent Summary</h2>
+        <div class="panel-subtitle">Per-agent performance and current output profile.</div>
+        
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Algorithm</th>
+          <th class="num">Stocks</th>
+          <th class="num">Avg Return</th>
+          <th class="num">Median Return</th>
+          <th class="num">Buy/Hold</th>
+          <th class="num">Profitable</th>
+          <th class="num">Avg Entries</th>
+          <th class="num">Avg Score</th>
+          <th>Top Pick</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+            <tr>
+              <td>momentum</td>
+              <td>Momentum</td>
+              <td class="num">2</td>
+              <td class="num">15.81</td>
+              <td class="num">15.81</td>
+              <td class="num">19.54</td>
+              <td class="num">2</td>
+              <td class="num">8.50</td>
+              <td class="num">3.91</td>
+              <td>MSFT</td>
+            </tr>
+            
+            <tr>
+              <td>rsi</td>
+              <td>RSI</td>
+              <td class="num">2</td>
+              <td class="num">-34.62</td>
+              <td class="num">-34.62</td>
+              <td class="num">19.54</td>
+              <td class="num">0</td>
+              <td class="num">11.00</td>
+              <td class="num">-34.62</td>
+              <td>MSFT</td>
+            </tr>
+            
+      </tbody>
+    </table>
+    
+      </section>
+
+      <section class="panel">
+        <h2>Family Summary</h2>
+        <div class="panel-subtitle">Grouped by strategy family with buy/sell mix and strongest stock/agent signals.</div>
+        
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Family</th>
+          <th class="num">Agents</th>
+          <th>Agent List</th>
+          <th class="num">Stocks</th>
+          <th class="num">Signals</th>
+          <th class="num">Buys</th>
+          <th class="num">Sells</th>
+          <th class="num">Holds</th>
+          <th class="num">Net</th>
+          <th>Buy Share</th>
+          <th>Sell Share</th>
+          <th class="num">Avg Strategy Return</th>
+          <th>Top Agent</th>
+          <th>Top Buy Stock</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+            <tr>
+              <td><strong>trend</strong></td>
+              <td class="num">1</td>
+              <td>momentum</td>
+              <td class="num">2</td>
+              <td class="num">2</td>
+              <td class="num">1</td>
+              <td class="num">1</td>
+              <td class="num">0</td>
+              <td class="num">0</td>
+              <td>
+                <div class="bar-wrap">
+                  <div class="bar buy" style="width: 50.0%"></div>
+                </div>
+                <span class="bar-label">50.0%</span>
+              </td>
+              <td>
+                <div class="bar-wrap">
+                  <div class="bar sell" style="width: 50.0%"></div>
+                </div>
+                <span class="bar-label">50.0%</span>
+              </td>
+              <td class="num">15.81</td>
+              <td>momentum</td>
+              <td>MSFT</td>
+            </tr>
+            
+            <tr>
+              <td><strong>mean_reversion</strong></td>
+              <td class="num">1</td>
+              <td>rsi</td>
+              <td class="num">2</td>
+              <td class="num">2</td>
+              <td class="num">0</td>
+              <td class="num">1</td>
+              <td class="num">1</td>
+              <td class="num">-1</td>
+              <td>
+                <div class="bar-wrap">
+                  <div class="bar buy" style="width: 0.0%"></div>
+                </div>
+                <span class="bar-label">0.0%</span>
+              </td>
+              <td>
+                <div class="bar-wrap">
+                  <div class="bar sell" style="width: 50.0%"></div>
+                </div>
+                <span class="bar-label">50.0%</span>
+              </td>
+              <td class="num">-34.62</td>
+              <td>rsi</td>
+              <td>nan</td>
+            </tr>
+            
+      </tbody>
+    </table>
+    
+      </section>
+
+      <section class="panel">
+        <h2>Shortlist</h2>
+        <div class="panel-subtitle">Filter by tier or search a ticker, agent, or family. This is the main screen for selecting candidates.</div>
+        
+    <div class="toolbar">
+      <input id="shortlist-search" type="search" placeholder="Search ticker, agent, or family..." />
+      <select id="tier-filter">
+        <option value="">All tiers</option>
+        <option value="TierA">Tier A</option>
+        <option value="TierB">Tier B</option>
+        <option value="TierC">Tier C</option>
+        <option value="Watch">Watch</option>
+        <option value="Mixed">Mixed</option>
+        <option value="Avoid">Avoid</option>
+      </select>
+    </div>
+    <div class="table-scroll">
+      <table class="data-table shortlist-table" id="shortlist-table">
+        <thead>
+          <tr>
+            <th>Stock</th>
+            <th>Tier</th>
+            <th>Consensus</th>
+            <th class="num">Agents</th>
+            <th class="num">Buys</th>
+            <th class="num">Sells</th>
+            <th class="num">Holds</th>
+            <th class="num">Net</th>
+            <th class="num">Conflict</th>
+            <th class="num">Buy Share</th>
+            <th class="num">Sell Share</th>
+            <th class="num">Trend Buys</th>
+            <th class="num">Reversion Buys</th>
+            <th class="num">Volume Buys</th>
+            <th class="num">Breakout Buys</th>
+            <th>Support Families</th>
+            <th>Supporting Agents</th>
+          </tr>
+        </thead>
+        <tbody>
+          
+            <tr data-tier="Watch" data-search="msft watch hold trend momentum rsi momentum momentum">
+              <td><strong>MSFT</strong></td>
+              <td><span class='tier-badge tier-watch'>Watch</span></td>
+              <td>Hold</td>
+              <td class="num">2</td>
+              <td class="num">1</td>
+              <td class="num">1</td>
+              <td class="num">0</td>
+              <td class="num">0</td>
+              <td class="num">1</td>
+              <td class="num">50.0%</td>
+              <td class="num">50.0%</td>
+              <td class="num">1</td>
+              <td class="num">0</td>
+              <td class="num">0</td>
+              <td class="num">0</td>
+              <td>trend</td>
+              <td>momentum</td>
+            </tr>
+            
+            <tr data-tier="Avoid" data-search="aapl avoid sell nan nan momentum momentum nan">
+              <td><strong>AAPL</strong></td>
+              <td><span class='tier-badge tier-avoid'>Avoid</span></td>
+              <td>Sell</td>
+              <td class="num">2</td>
+              <td class="num">0</td>
+              <td class="num">1</td>
+              <td class="num">1</td>
+              <td class="num">-1</td>
+              <td class="num">0</td>
+              <td class="num">0.0%</td>
+              <td class="num">50.0%</td>
+              <td class="num">0</td>
+              <td class="num">0</td>
+              <td class="num">0</td>
+              <td class="num">0</td>
+              <td>nan</td>
+              <td>nan</td>
+            </tr>
+            
+        </tbody>
+      </table>
+    </div>
+    
+      </section>
+
+      <section class="panel">
+        <h2>Consensus</h2>
+        <div class="panel-subtitle">Grouped stock consensus across agents.</div>
+        
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Stock</th>
+          <th class="num">Buy</th>
+          <th class="num">Sell</th>
+          <th class="num">Hold</th>
+          <th class="num">Mean Score</th>
+          <th>Best Agent</th>
+          <th class="num">Best Score</th>
+          <th>Supporting Agents</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+            <tr>
+              <td><strong>MSFT</strong></td>
+              <td class="num">1</td>
+              <td class="num">1</td>
+              <td class="num">0</td>
+              <td class="num">-12.83</td>
+              <td>momentum</td>
+              <td class="num">8.84</td>
+              <td>momentum, rsi</td>
+            </tr>
+            
+            <tr>
+              <td><strong>AAPL</strong></td>
+              <td class="num">0</td>
+              <td class="num">1</td>
+              <td class="num">1</td>
+              <td class="num">-17.87</td>
+              <td>momentum</td>
+              <td class="num">-1.02</td>
+              <td>momentum, rsi</td>
+            </tr>
+            
+      </tbody>
+    </table>
+    
+      </section>
+    </div>
+  </main>
+  <script>
+    const search = document.getElementById("shortlist-search");
+    const tierFilter = document.getElementById("tier-filter");
+    const table = document.getElementById("shortlist-table");
+
+    function applyFilters() {
+      if (!table) return;
+      const query = (search && search.value ? search.value.trim().toLowerCase() : "");
+      const tier = tierFilter ? tierFilter.value : "";
+      const rows = table.querySelectorAll("tbody tr");
+      rows.forEach((row) => {
+        const rowTier = row.getAttribute("data-tier") || "";
+        const haystack = row.getAttribute("data-search") || "";
+        const tierOk = !tier || rowTier === tier;
+        const searchOk = !query || haystack.includes(query);
+        row.style.display = tierOk && searchOk ? "" : "none";
+      });
+    }
+
+    if (search) search.addEventListener("input", applyFilters);
+    if (tierFilter) tierFilter.addEventListener("change", applyFilters);
+    applyFilters();
+  </script>
+</body>
+</html>

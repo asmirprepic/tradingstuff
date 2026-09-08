@@ -1,5 +1,6 @@
 import argparse
 import html
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -37,6 +38,28 @@ def read_csv_or_empty(path):
     if not file_path.exists():
         return pd.DataFrame()
     return pd.read_csv(file_path)
+
+
+def find_latest_manifest(directory):
+    manifests = list(Path(directory).glob("technical_agent_run_manifest*.json"))
+    if not manifests:
+        raise FileNotFoundError(f"No technical run manifests found in {directory}")
+    return max(manifests, key=lambda path: path.name)
+
+
+def load_manifest_paths(path):
+    manifest_path = Path(path).resolve()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    outputs = manifest.get("outputs", {})
+    resolved = {}
+    for name in ("summary", "recommendations", "consensus", "family_summary", "shortlist"):
+        output_path = outputs.get(name)
+        if output_path:
+            candidate = Path(output_path)
+            if not candidate.is_absolute():
+                candidate = manifest_path.parent / candidate
+            resolved[name] = str(candidate)
+    return manifest, resolved
 
 
 def format_number(value, digits=2):
@@ -375,6 +398,7 @@ def render_shortlist_table(df):
 
 def render_html(context):
     metrics = context["metrics"]
+    run_id = context.get("run_id")
     summary_html = render_agent_summary_table(context["summary"])
     family_html = render_family_summary_table(context["family"])
     consensus_html = render_consensus_table(context["consensus"])
@@ -390,6 +414,7 @@ def render_html(context):
             render_metric_card("Sell Consensus", metrics["sell_rows"], "Shortlist sell recommendations", "negative"),
         ]
     )
+    run_pill = f'<span class="pill">Run {html.escape(str(run_id))}</span>' if run_id else ""
 
     return f"""<!doctype html>
 <html lang="en">
@@ -593,6 +618,7 @@ def render_html(context):
         </div>
         <div class="hero-meta">
           <span class="pill">Generated {html.escape(context["generated_at"])}</span>
+          {run_pill}
           <span class="pill">{metrics["shortlist_rows"]} shortlist rows</span>
           <span class="pill">{metrics["tier_a_rows"]} Tier A picks</span>
         </div>
@@ -664,13 +690,24 @@ def render_html(context):
 
 
 def build_dashboard(args):
-    summary_df = read_csv_or_empty(args.summary)
-    recommendations_df = read_csv_or_empty(args.recommendations)
-    consensus_df = read_csv_or_empty(args.consensus)
-    family_df = read_csv_or_empty(args.family_summary)
-    shortlist_df = read_csv_or_empty(args.shortlist)
+    manifest_path = args.manifest
+    if args.latest_manifest_dir:
+        manifest_path = find_latest_manifest(args.latest_manifest_dir)
+
+    manifest = None
+    manifest_paths = {}
+    if manifest_path:
+        manifest, manifest_paths = load_manifest_paths(manifest_path)
+
+    summary_df = read_csv_or_empty(manifest_paths.get("summary", args.summary))
+    recommendations_df = read_csv_or_empty(manifest_paths.get("recommendations", args.recommendations))
+    consensus_df = read_csv_or_empty(manifest_paths.get("consensus", args.consensus))
+    family_df = read_csv_or_empty(manifest_paths.get("family_summary", args.family_summary))
+    shortlist_df = read_csv_or_empty(manifest_paths.get("shortlist", args.shortlist))
 
     context = build_dashboard_context(summary_df, family_df, consensus_df, shortlist_df, recommendations_df)
+    if manifest:
+        context["run_id"] = manifest.get("run_id")
     html_text = render_html(context)
 
     output_path = Path(args.output)
@@ -686,6 +723,8 @@ def main(argv=None):
     parser.add_argument("--consensus", default=DEFAULT_CONSENSUS, help="Consensus CSV")
     parser.add_argument("--family-summary", default=DEFAULT_FAMILY_SUMMARY, help="Family summary CSV")
     parser.add_argument("--shortlist", default=DEFAULT_SHORTLIST, help="Shortlist CSV")
+    parser.add_argument("--manifest", default=None, help="Run manifest JSON; its output paths override CSV arguments")
+    parser.add_argument("--latest-manifest-dir", default=None, help="Load the newest technical run manifest in this directory")
     parser.add_argument("--output", default=DEFAULT_OUTPUT, help="HTML output path")
     args = parser.parse_args(argv)
 

@@ -1,8 +1,16 @@
+import json
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
-from scripts.technical_dashboard import build_dashboard_context, render_html
+from scripts.technical_dashboard import (
+    build_dashboard_context,
+    find_latest_manifest,
+    load_manifest_paths,
+    render_html,
+)
 
 
 class TechnicalDashboardTests(unittest.TestCase):
@@ -44,6 +52,22 @@ class TechnicalDashboardTests(unittest.TestCase):
         self.assertIn("Shortlist", html)
         self.assertIn("MSFT", html)
         self.assertIn("Tier A", html)
+
+    def test_latest_manifest_and_relative_output_paths_are_resolved(self):
+        root = Path.cwd()
+        older = root / "technical_agent_run_manifest_20260101_120000.json"
+        latest = root / "technical_agent_run_manifest_20260102_120000.json"
+        manifest_json = json.dumps({"run_id": "new", "outputs": {"shortlist": "latest_shortlist.csv"}})
+
+        with patch.object(Path, "glob", return_value=[older, latest]):
+            selected = find_latest_manifest(root)
+
+        with patch.object(Path, "read_text", return_value=manifest_json):
+            manifest, paths = load_manifest_paths(selected)
+
+        self.assertEqual(selected, latest)
+        self.assertEqual(manifest["run_id"], "new")
+        self.assertEqual(Path(paths["shortlist"]), root / "latest_shortlist.csv")
 
 
 if __name__ == "__main__":

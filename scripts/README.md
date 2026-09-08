@@ -62,6 +62,12 @@ Build a self-contained HTML dashboard from the technical-agent CSV outputs.
 python -m scripts.technical_dashboard --output outputs/dashboard/technical_dashboard.html
 ```
 
+Load the latest timestamped technical run automatically:
+
+```bash
+python -m scripts.technical_dashboard --latest-manifest-dir . --output outputs/dashboard/technical_dashboard.html
+```
+
 **Output:**
 
 - `outputs/dashboard/technical_dashboard.html`: interactive local report with agent summary, family summary, shortlist filters, and consensus tables.
