@@ -24,6 +24,7 @@ ML_TYPE_MODULES = {
         "variational_encoder_agent",
     ),
     "classical": (
+        "gaussian_process_agent",
         "knn_agent",
         "logistic_reg_agent",
         "naive_bayes_agent",
@@ -50,6 +51,7 @@ _KEEP_AGENT_SPECS = {
     "ClusteringFilteredKNNAgent": ("agents.ml_based.clustering.clustering_agent", "ClusteringFilteredKNNAgent"),
     "CNNAgent": ("agents.ml_based.deep_learning.cnn_agent", "CNNAgent"),
     "HMMRegimeAgent": ("agents.ml_based.regime.hmm_based_agent", "HMMRegimeAgent"),
+    "GaussianProcessAgent": ("agents.ml_based.classical.gaussian_process_agent", "GaussianProcessAgent"),
     "KNNAgent": ("agents.ml_based.classical.knn_agent", "KNNAgent"),
     "LRAgent": ("agents.ml_based.classical.logistic_reg_agent", "LRAgent"),
     "LSTMAgent": ("agents.ml_based.deep_learning.lstm_agent", "LSTMAgent"),

@@ -14,6 +14,7 @@ from agents.ml_based.clustering.clustering_agent import ClusteringFilteredKNNAge
 from agents.ml_based.deep_learning.lstm_attention_agent import LSTMAttentionAgent
 from agents.ml_based.deep_learning.nn_classification_agent import DenseNNAgent
 from agents.ml_based.regime.hmm_based_agent import HMMRegimeAgent
+from agents.ml_based.classical.gaussian_process_agent import GaussianProcessAgent
 from agents.ml_based.classical.logistic_reg_agent import LRAgent
 from agents.ml_based.deep_learning.lstm_agent import LSTMAgent
 from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
@@ -743,6 +744,34 @@ class BaseAgentsTests(unittest.TestCase):
 
         self.assertListEqual(X.columns.tolist(), ["OC", "HL"])
         self.assertEqual(len(X), len(y))
+
+    def test_gaussian_process_agent_caps_training_window_and_validates_parameters(self):
+        data = make_market_data(periods=80)
+        agent = GaussianProcessAgent(data, max_samples=30)
+
+        X, y = agent.feature_engineering("AAA")
+
+        self.assertEqual(len(X), 30)
+        self.assertEqual(len(X), len(y))
+        self.assertListEqual(X.columns.tolist(), agent.features)
+
+        with self.assertRaises(ValueError):
+            GaussianProcessAgent(data, max_samples=10)
+        with self.assertRaises(ValueError):
+            GaussianProcessAgent(data, proba_threshold=1.0)
+
+    def test_gaussian_process_agent_trains_and_emits_probabilities(self):
+        data = make_market_data(periods=60)
+        agent = GaussianProcessAgent(data, max_samples=40, proba_threshold=0.55)
+
+        signals = agent.generate_signal_strategy("AAA", mode="backtest")
+
+        self.assertIs(signals, agent.signal_data["AAA"])
+        self.assertIn("ProbUp", signals.columns)
+        self.assertIn("SignalStrength", signals.columns)
+        self.assertTrue(signals["Position"].isin([-1, 1]).all())
+        summary = agent.training_summary("AAA")
+        self.assertEqual(summary.iloc[0]["Agent"], "GaussianProcess")
 
     def test_hmm_agent_uses_explicit_train_predict_flow(self):
         data = make_market_data(periods=12)
