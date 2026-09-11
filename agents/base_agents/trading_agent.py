@@ -1,4 +1,11 @@
 from abc import ABC,abstractmethod
+import hashlib
+import json
+import platform
+from datetime import datetime
+from pathlib import Path
+
+import joblib
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -40,6 +47,143 @@ class TradingAgent(ABC):
             if isinstance(container, dict) and stock in container:
                 return container[stock]
         return None
+
+    def _model_container_name(self):
+        if hasattr(self, "models"):
+            return "models"
+        if hasattr(self, "hmm_models"):
+            return "hmm_models"
+        raise ValueError(f"{type(self).__name__} does not expose a supported model container.")
+
+    def _is_keras_model(self, model):
+        model_module = type(model).__module__.lower()
+        return "keras" in model_module or "tensorflow" in model_module
+
+    def _sha256(self, path):
+        digest = hashlib.sha256()
+        with Path(path).open("rb") as file_obj:
+            for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def save_model_artifact(self, stock, directory):
+        model = self._trained_model_for_stock(stock)
+        if model is None:
+            raise ValueError(f"No trained model is available for {stock}.")
+
+        artifact_dir = Path(directory)
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        model_format = "keras" if self._is_keras_model(model) else "joblib"
+        model_filename = "model.keras" if model_format == "keras" else "model.joblib"
+        model_path = artifact_dir / model_filename
+        state_path = artifact_dir / "state.joblib"
+
+        if model_format == "keras":
+            model.save(model_path)
+        else:
+            joblib.dump(model, model_path)
+
+        auxiliary_state = {}
+        for attr_name in (
+            "thresholds",
+            "scalers",
+            "best_regimes",
+            "regime_return_maps",
+        ):
+            container = getattr(self, attr_name, None)
+            if isinstance(container, dict) and stock in container:
+                auxiliary_state[attr_name] = container[stock]
+
+        state = {
+            "train_data": getattr(self, "train_data", {}).get(stock),
+            "training_info": getattr(self, "training_info", {}).get(stock),
+            "auxiliary_state": auxiliary_state,
+        }
+        joblib.dump(state, state_path)
+
+        manifest = {
+            "schema_version": 1,
+            "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "stock": stock,
+            "agent_class": type(self).__name__,
+            "agent_module": type(self).__module__,
+            "algorithm_name": self.algorithm_name,
+            "model_class": type(model).__name__,
+            "model_format": model_format,
+            "model_file": model_filename,
+            "state_file": state_path.name,
+            "features": list(self.features) if getattr(self, "features", None) is not None else None,
+            "score_column": self.score_column,
+            "versions": {
+                "python": platform.python_version(),
+                "numpy": np.__version__,
+                "pandas": pd.__version__,
+            },
+            "sha256": {
+                model_filename: self._sha256(model_path),
+                state_path.name: self._sha256(state_path),
+            },
+        }
+        manifest_path = artifact_dir / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        return manifest_path
+
+    def load_model_artifact(self, directory, trusted=False, strict=True):
+        if not trusted:
+            raise ValueError(
+                "Model artifacts can execute code while loading. "
+                "Only load artifacts you created or verified, then pass trusted=True."
+            )
+
+        artifact_dir = Path(directory)
+        manifest_path = artifact_dir / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        if strict and manifest.get("agent_class") != type(self).__name__:
+            raise ValueError(
+                f"Artifact agent class {manifest.get('agent_class')} does not match {type(self).__name__}."
+            )
+        if strict and manifest.get("features") != (
+            list(self.features) if getattr(self, "features", None) is not None else None
+        ):
+            raise ValueError("Artifact features do not match this agent configuration.")
+
+        model_path = artifact_dir / manifest["model_file"]
+        state_path = artifact_dir / manifest["state_file"]
+        for file_path in (model_path, state_path):
+            expected_hash = manifest.get("sha256", {}).get(file_path.name)
+            if not expected_hash or self._sha256(file_path) != expected_hash:
+                raise ValueError(f"Artifact integrity check failed for {file_path.name}.")
+
+        if manifest["model_format"] == "keras":
+            try:
+                from tensorflow.keras.models import load_model
+            except ModuleNotFoundError as exc:
+                raise ModuleNotFoundError("tensorflow is required to load this Keras artifact.") from exc
+            try:
+                model = load_model(model_path, safe_mode=True)
+            except TypeError:
+                model = load_model(model_path)
+        elif manifest["model_format"] == "joblib":
+            model = joblib.load(model_path)
+        else:
+            raise ValueError(f"Unsupported model format: {manifest['model_format']}")
+
+        state = joblib.load(state_path)
+        stock = manifest["stock"]
+        model_container = getattr(self, self._model_container_name())
+        model_container[stock] = model
+
+        if state.get("train_data") is not None:
+            self.train_data[stock] = state["train_data"]
+        if state.get("training_info") is not None:
+            self.training_info[stock] = state["training_info"]
+        for attr_name, value in state.get("auxiliary_state", {}).items():
+            container = getattr(self, attr_name, None)
+            if isinstance(container, dict):
+                container[stock] = value
+
+        return manifest
 
     def _training_parts(self, stock):
         train_data = getattr(self, "train_data", {})

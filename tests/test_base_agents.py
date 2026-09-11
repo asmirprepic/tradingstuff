@@ -1,4 +1,6 @@
 import unittest
+import uuid
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -405,6 +407,37 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertGreater(row["TestSamples"], 0)
         self.assertIn("Accuracy", summary.columns)
         self.assertIn("F1Score", summary.columns)
+
+    def test_ml_model_artifact_round_trip_restores_model_and_training_state(self):
+        data = make_market_data(periods=80)
+        agent = LRAgent(data)
+        agent.train_model("AAA")
+        expected = agent.predict_signals("AAA", mode="backtest")
+        artifact_dir = Path("outputs") / f"model_artifact_test_{uuid.uuid4().hex}"
+
+        try:
+            manifest_path = agent.save_model_artifact("AAA", artifact_dir)
+            restored = LRAgent(data)
+
+            with self.assertRaises(ValueError):
+                restored.load_model_artifact(artifact_dir)
+
+            manifest = restored.load_model_artifact(artifact_dir, trusted=True)
+            actual = restored.predict_signals("AAA", mode="backtest")
+
+            self.assertTrue(manifest_path.exists())
+            self.assertEqual(manifest["stock"], "AAA")
+            self.assertEqual(manifest["agent_class"], "LRAgent")
+            self.assertIn("AAA", restored.models)
+            self.assertIn("AAA", restored.train_data)
+            self.assertIn("AAA", restored.training_info)
+            np.testing.assert_allclose(actual["ProbUp"], expected["ProbUp"])
+            self.assertListEqual(actual["Position"].tolist(), expected["Position"].tolist())
+        finally:
+            if artifact_dir.exists():
+                for artifact_file in artifact_dir.iterdir():
+                    artifact_file.unlink()
+                artifact_dir.rmdir()
 
     def test_ml_predict_signals_preserves_short_positions_for_minus_one_labels(self):
         data = make_market_data(periods=6)
