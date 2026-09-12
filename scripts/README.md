@@ -72,6 +72,16 @@ python -m scripts.technical_dashboard --latest-manifest-dir . --output outputs/d
 
 - `outputs/dashboard/technical_dashboard.html`: interactive local report with agent summary, family summary, shortlist filters, and consensus tables.
 
+### `run_ml_agents.py`
+
+Run selected ML agents against explicit tickers or the technical shortlist, with training summaries, recommendations, optional model artifacts, and a run manifest.
+
+```bash
+python -m scripts.run_ml_agents --use-synthetic --tickers AAPL,MSFT --agents lightweight
+```
+
+See `scripts/RUN_ML_AGENTS.md` for model groups, shortlist input, and artifact reuse.
+
 ### `run_recommendations.py`
 
 Generate trading recommendations using MomentumAgent.

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-09-12T23:52:39+02:00",
+  "stock": "AAPL",
+  "agent_class": "LRAgent",
+  "agent_module": "agents.ml_based.classical.logistic_reg_agent",
+  "algorithm_name": "Logistic_Regression",
+  "model_class": "LogisticRegression",
+  "model_format": "joblib",
+  "model_file": "model.joblib",
+  "state_file": "state.joblib",
+  "features": [
+    "OC",
+    "HL",
+    "Return_1D",
+    "Return_5D",
+    "MA_5",
+    "MA_10",
+    "Momentum",
+    "Volatility_5D",
+    "Volume_Change"
+  ],
+  "score_column": "SignalStrength",
+  "versions": {
+    "python": "3.13.14",
+    "numpy": "2.2.5",
+    "pandas": "2.2.3"
+  },
+  "sha256": {
+    "model.joblib": "924f4d904aa51c817809234eb1ddb98096828a72663ddad981858073063890af",
+    "state.joblib": "ae22ea932f0fedfb155ca9160eb9a3dba6f42231088e70ed23e53786ba9eade0"
+  }
+}
