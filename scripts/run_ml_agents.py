@@ -16,6 +16,7 @@ from agents.ml_based.classical.gaussian_process_agent import GaussianProcessAgen
 from agents.ml_based.classical.knn_agent import KNNAgent
 from agents.ml_based.classical.logistic_reg_agent import LRAgent
 from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
+from agents.ml_based.classical.online_sgd_agent import OnlineSGDAgent
 from agents.ml_based.classical.svm_agent import SVMAgent
 from agents.ml_based.clustering.clustering_agent import ClusteringFilteredKNNAgent
 from agents.ml_based.deep_learning.cnn_agent import CNNAgent
@@ -41,6 +42,7 @@ AGENT_ORDER = [
     "svm",
     "knn",
     "gaussian_process",
+    "online_sgd",
     "clustering_knn",
     "hmm_regime",
     "autoencoder",
@@ -53,8 +55,8 @@ AGENT_ORDER = [
 ]
 
 AGENT_GROUPS = {
-    "classical": ["logistic_reg", "naive_bayes", "svm", "knn", "gaussian_process"],
-    "lightweight": ["logistic_reg", "naive_bayes", "svm", "knn"],
+    "classical": ["logistic_reg", "naive_bayes", "svm", "knn", "online_sgd", "gaussian_process"],
+    "lightweight": ["logistic_reg", "naive_bayes", "svm", "knn", "online_sgd"],
     "specialized": ["clustering_knn", "hmm_regime", "autoencoder"],
     "deep": ["dense_nn", "cnn", "lstm", "lstm_attention", "tcn", "transformer"],
     "all": AGENT_ORDER,
@@ -106,6 +108,8 @@ def build_agent(agent_name, price_df, args):
             max_samples=args.gaussian_max_samples,
             proba_threshold=args.proba_threshold,
         )
+    if agent_name == "online_sgd":
+        return OnlineSGDAgent(price_df, proba_threshold=args.proba_threshold)
     if agent_name == "clustering_knn":
         return ClusteringFilteredKNNAgent(price_df)
     if agent_name == "hmm_regime":

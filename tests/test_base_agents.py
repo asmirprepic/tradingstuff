@@ -20,6 +20,7 @@ from agents.ml_based.classical.gaussian_process_agent import GaussianProcessAgen
 from agents.ml_based.classical.logistic_reg_agent import LRAgent
 from agents.ml_based.deep_learning.lstm_agent import LSTMAgent
 from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
+from agents.ml_based.classical.online_sgd_agent import OnlineSGDAgent
 from agents.ml_based.deep_learning.tcn_agent import TCNAgent
 from agents.ml_based.deep_learning.transformer_agent import TransformerAgent
 from agents.ml_based.classical.svm_agent import SVMAgent
@@ -805,6 +806,31 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertTrue(signals["Position"].isin([-1, 1]).all())
         summary = agent.training_summary("AAA")
         self.assertEqual(summary.iloc[0]["Agent"], "GaussianProcess")
+
+    def test_online_sgd_agent_updates_only_new_labeled_rows(self):
+        initial_data = make_market_data(periods=60)
+        agent = OnlineSGDAgent(initial_data)
+        agent.train_model("AAA")
+
+        self.assertEqual(agent.update_model("AAA"), 0)
+
+        agent.data = make_market_data(periods=65)
+        updated_samples = agent.update_model("AAA")
+
+        self.assertEqual(updated_samples, 5)
+        self.assertEqual(agent.training_info["AAA"]["OnlineUpdates"], 1)
+        self.assertEqual(agent.training_info["AAA"]["OnlineSamples"], 5)
+        signals = agent.predict_signals("AAA", mode="live", threshold=0.55)
+        self.assertIn("ProbUp", signals.columns)
+        self.assertEqual(signals.index[-1], agent.data["AAA"].index[-1])
+
+    def test_online_sgd_agent_validates_parameters(self):
+        data = make_market_data(periods=30)
+
+        with self.assertRaises(ValueError):
+            OnlineSGDAgent(data, alpha=0)
+        with self.assertRaises(ValueError):
+            OnlineSGDAgent(data, proba_threshold=1.0)
 
     def test_hmm_agent_uses_explicit_train_predict_flow(self):
         data = make_market_data(periods=12)
