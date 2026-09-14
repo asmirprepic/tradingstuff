@@ -25,6 +25,7 @@ from agents.ml_based.deep_learning.tcn_agent import TCNAgent
 from agents.ml_based.deep_learning.transformer_agent import TransformerAgent
 from agents.ml_based.classical.svm_agent import SVMAgent
 from agents.technical.adx_dmi_agent import ADXDMIAgent
+from agents.technical.change_point_agent import ChangePointAgent
 from agents.technical.bollinger_bands_agent import BollingerBandsAgent
 from agents.technical.high_low import HighLowAgent
 from agents.technical.macd_agent import MACDAgent
@@ -1256,6 +1257,51 @@ class BaseAgentsTests(unittest.TestCase):
 
         self.assertEqual(agent.signal_data, {})
         self.assertEqual(agent.returns_data, {})
+
+    def test_change_point_agent_detects_both_shift_directions(self):
+        index = pd.date_range("2024-01-01", periods=90, freq="B")
+        returns = np.r_[np.tile([0.001, -0.001], 30), np.full(15, 0.03), np.full(15, -0.04)]
+        close = 100.0 * np.exp(np.cumsum(returns))
+        columns = pd.MultiIndex.from_product([["AAA"], ["Open", "High", "Low", "Close", "Volume"]])
+        data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        data[("AAA", "Close")] = close
+        data[("AAA", "Open")] = close
+        data[("AAA", "High")] = close * 1.01
+        data[("AAA", "Low")] = close * 0.99
+        data[("AAA", "Volume")] = 1000.0
+
+        agent = ChangePointAgent(data, lookback=20, threshold=4.0, auto_generate=False)
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertIn(1, signals["ChangePoint"].tolist())
+        self.assertIn(-1, signals["ChangePoint"].tolist())
+        self.assertEqual(signals["Position"].iloc[-1], -1)
+        self.assertLess(signals["SignalStrength"].iloc[-1], 0)
+
+    def test_change_point_agent_uses_causal_warmup_and_validates_parameters(self):
+        data = make_market_data(periods=20)
+        agent = ChangePointAgent(data, lookback=5, auto_generate=False)
+        signals = agent.generate_signal_strategy("AAA")
+
+        self.assertTrue(signals["Valid"].iloc[:6].eq(False).all())
+        self.assertTrue((signals["Position"].iloc[:6] == 0).all())
+        with self.assertRaises(ValueError):
+            ChangePointAgent(data, lookback=1, auto_generate=False)
+        with self.assertRaises(ValueError):
+            ChangePointAgent(data, threshold=0, auto_generate=False)
+
+    def test_family_summary_supports_change_point_regime_family(self):
+        recs = pd.DataFrame(
+            [{"Agent": "change_point", "Stock": "AAA", "Recommendation": "Buy", "Score": 0.8}]
+        )
+        summary = pd.DataFrame(
+            [{"Agent": "change_point", "AvgStrategyReturnPct": 2.0, "AvgScore": 0.8}]
+        )
+
+        result = build_family_summary_table(recs, summary)
+
+        self.assertEqual(result.iloc[0]["Family"], "regime")
+        self.assertEqual(result.iloc[0]["BuySignals"], 1)
 
     def test_adx_dmi_agent_validates_parameters(self):
         data = make_market_data(periods=20)

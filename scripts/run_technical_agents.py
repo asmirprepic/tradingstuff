@@ -16,6 +16,7 @@ from data_handling.get_stock_data import GetStockDataTest
 from data_handling.get_stock_tickers_upd import GetTickers
 from agents.technical.bollinger_bands_agent import BollingerBandsAgent
 from agents.technical.adx_dmi_agent import ADXDMIAgent
+from agents.technical.change_point_agent import ChangePointAgent
 from agents.technical.high_low import HighLowAgent
 from agents.technical.macd_agent import MACDAgent
 from agents.technical.mean_reversion_agent import MeanReversionAgent
@@ -40,6 +41,7 @@ AGENT_ORDER = [
     "macd",
     "bollinger",
     "adx_dmi",
+    "change_point",
     "mean_reversion",
     "rsi",
     "supertrend",
@@ -58,6 +60,7 @@ AGENT_FAMILIES = {
     "moving_average_crossover": "trend",
     "macd": "trend",
     "adx_dmi": "trend",
+    "change_point": "regime",
     "supertrend": "trend",
     "performance": "trend",
     "bollinger": "mean_reversion",
@@ -198,6 +201,8 @@ def build_agent(agent_name, price_df):
         return BollingerBandsAgent(price_df, period=20, num_std_dev=2.0)
     if agent_name == "adx_dmi":
         return ADXDMIAgent(price_df, period=14, adx_threshold=20.0)
+    if agent_name == "change_point":
+        return ChangePointAgent(price_df, lookback=60, threshold=5.0, drift=0.25)
     if agent_name == "mean_reversion":
         return MeanReversionAgent(price_df, lookback_period=20, threshold=2.0)
     if agent_name == "rsi":
@@ -315,8 +320,10 @@ def build_family_summary_table(all_recs, summary_df):
         summary_by_agent["Family"] = summary_by_agent["Agent"].map(AGENT_FAMILIES).fillna("other")
 
     rows = []
-    family_order = ["trend", "mean_reversion", "volume_confirmation", "breakout", "other"]
-    families = [f for f in family_order if f in recs["Family"].unique()]
+    family_order = ["trend", "mean_reversion", "volume_confirmation", "breakout", "regime", "other"]
+    observed_families = recs["Family"].drop_duplicates().tolist()
+    families = [family for family in family_order if family in observed_families]
+    families.extend(family for family in observed_families if family not in family_order)
 
     for family in families:
         group = recs[recs["Family"] == family]
