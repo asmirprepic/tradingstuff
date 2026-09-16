@@ -21,6 +21,7 @@ from agents.ml_based.classical.logistic_reg_agent import LRAgent
 from agents.ml_based.deep_learning.lstm_agent import LSTMAgent
 from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
 from agents.ml_based.classical.online_sgd_agent import OnlineSGDAgent
+from agents.ml_based.classical.quantile_regression_agent import QuantileRegressionAgent
 from agents.ml_based.deep_learning.tcn_agent import TCNAgent
 from agents.ml_based.deep_learning.transformer_agent import TransformerAgent
 from agents.ml_based.classical.svm_agent import SVMAgent
@@ -832,6 +833,54 @@ class BaseAgentsTests(unittest.TestCase):
             OnlineSGDAgent(data, alpha=0)
         with self.assertRaises(ValueError):
             OnlineSGDAgent(data, proba_threshold=1.0)
+
+    def test_quantile_regression_agent_uses_purged_time_split_and_live_row(self):
+        data = make_market_data(periods=100)
+        agent = QuantileRegressionAgent(data)
+        metrics = agent.train_model("AAA")
+        x_train, x_test, _, _ = agent.train_data["AAA"]
+        labeled, _ = agent.feature_engineering("AAA")
+
+        self.assertEqual(x_train.index[-1], labeled.index[int(len(labeled) * 0.8) - 2])
+        self.assertEqual(x_test.index[0], labeled.index[int(len(labeled) * 0.8)])
+        self.assertIn("interval_coverage", metrics)
+        backtest = agent.predict_signals("AAA", mode="backtest")
+        live = agent.predict_signals("AAA", mode="live")
+        self.assertTrue(backtest.index.equals(x_test.index))
+        self.assertEqual(live.index[-1], data.index[-1])
+        self.assertTrue((backtest["ExpectedReturnLower"] <= backtest["ExpectedReturnMedian"]).all())
+        self.assertTrue((backtest["ExpectedReturnMedian"] <= backtest["ExpectedReturnUpper"]).all())
+        self.assertTrue(backtest["Position"].isin([-1, 0, 1]).all())
+        self.assertIn("IntervalCoverage", agent.training_summary("AAA").columns)
+
+    def test_quantile_regression_agent_artifact_round_trip(self):
+        data = make_market_data(periods=100)
+        agent = QuantileRegressionAgent(data)
+        agent.train_model("AAA")
+        expected = agent.predict_signals("AAA", mode="backtest")
+        artifact_dir = Path("outputs") / f"quantile_artifact_test_{uuid.uuid4().hex}"
+
+        try:
+            agent.save_model_artifact("AAA", artifact_dir)
+            restored = QuantileRegressionAgent(data)
+            restored.load_model_artifact(artifact_dir, trusted=True)
+            actual = restored.predict_signals("AAA", mode="backtest")
+            np.testing.assert_allclose(actual["ExpectedReturnMedian"], expected["ExpectedReturnMedian"])
+            self.assertEqual(restored.training_info["AAA"], agent.training_info["AAA"])
+        finally:
+            if artifact_dir.exists():
+                for artifact_file in artifact_dir.iterdir():
+                    artifact_file.unlink()
+                artifact_dir.rmdir()
+
+    def test_quantile_regression_agent_validates_inputs_and_sample_size(self):
+        data = make_market_data(periods=30)
+        with self.assertRaises(ValueError):
+            QuantileRegressionAgent(data, quantiles=(0.9, 0.5, 0.1))
+        with self.assertRaises(ValueError):
+            QuantileRegressionAgent(data, alpha=-1)
+        with self.assertRaises(ValueError):
+            QuantileRegressionAgent(data).train_model("AAA")
 
     def test_hmm_agent_uses_explicit_train_predict_flow(self):
         data = make_market_data(periods=12)

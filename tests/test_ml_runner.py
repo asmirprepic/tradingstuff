@@ -51,6 +51,13 @@ class MLRunnerTests(unittest.TestCase):
         self.assertEqual(agent.max_samples, 30)
         self.assertEqual(safe_component("BRK/B"), "BRK_B")
 
+    def test_build_agent_supports_quantile_regression(self):
+        data = make_synthetic_ohlcv(["AAA"], periods=100)
+        agent = build_agent("quantile_regression", data, Namespace())
+
+        self.assertEqual(agent.algorithm_name, "QuantileRegression")
+        self.assertIn("quantile_regression", parse_agent_names("classical"))
+
 
 if __name__ == "__main__":
     unittest.main()

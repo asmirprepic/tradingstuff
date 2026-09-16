@@ -109,7 +109,10 @@ def evaluations_from_agent(agent, persistence=1, min_score=None, top_n=None, sav
             action = "BUY" if last_sig == 1 else ("SELL" if last_sig == -1 else "HOLD")
 
         latest_features = {}
-        extra_cols = ["SignalStrength", "Momentum"]
+        extra_cols = [
+            "SignalStrength", "Momentum", "ExpectedReturnLower",
+            "ExpectedReturnMedian", "ExpectedReturnUpper", "IntervalWidth",
+        ]
         score_col = getattr(agent, "score_column", None)
         if score_col and score_col not in extra_cols:
             extra_cols.append(score_col)

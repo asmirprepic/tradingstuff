@@ -17,6 +17,7 @@ from agents.ml_based.classical.knn_agent import KNNAgent
 from agents.ml_based.classical.logistic_reg_agent import LRAgent
 from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
 from agents.ml_based.classical.online_sgd_agent import OnlineSGDAgent
+from agents.ml_based.classical.quantile_regression_agent import QuantileRegressionAgent
 from agents.ml_based.classical.svm_agent import SVMAgent
 from agents.ml_based.clustering.clustering_agent import ClusteringFilteredKNNAgent
 from agents.ml_based.deep_learning.cnn_agent import CNNAgent
@@ -43,6 +44,7 @@ AGENT_ORDER = [
     "knn",
     "gaussian_process",
     "online_sgd",
+    "quantile_regression",
     "clustering_knn",
     "hmm_regime",
     "autoencoder",
@@ -55,7 +57,7 @@ AGENT_ORDER = [
 ]
 
 AGENT_GROUPS = {
-    "classical": ["logistic_reg", "naive_bayes", "svm", "knn", "online_sgd", "gaussian_process"],
+    "classical": ["logistic_reg", "naive_bayes", "svm", "knn", "online_sgd", "gaussian_process", "quantile_regression"],
     "lightweight": ["logistic_reg", "naive_bayes", "svm", "knn", "online_sgd"],
     "specialized": ["clustering_knn", "hmm_regime", "autoencoder"],
     "deep": ["dense_nn", "cnn", "lstm", "lstm_attention", "tcn", "transformer"],
@@ -110,6 +112,8 @@ def build_agent(agent_name, price_df, args):
         )
     if agent_name == "online_sgd":
         return OnlineSGDAgent(price_df, proba_threshold=args.proba_threshold)
+    if agent_name == "quantile_regression":
+        return QuantileRegressionAgent(price_df)
     if agent_name == "clustering_knn":
         return ClusteringFilteredKNNAgent(price_df)
     if agent_name == "hmm_regime":
@@ -191,6 +195,9 @@ def build_agent_summary(agent_name, agent, recs, failures):
         "AvgPrecision": float(training["Precision"].mean()) if "Precision" in training else float("nan"),
         "AvgRecall": float(training["Recall"].mean()) if "Recall" in training else float("nan"),
         "AvgF1Score": float(training["F1Score"].mean()) if "F1Score" in training else float("nan"),
+        "AvgMAE": float(training["MAE"].mean()) if "MAE" in training else float("nan"),
+        "AvgIntervalCoverage": float(training["IntervalCoverage"].mean()) if "IntervalCoverage" in training else float("nan"),
+        "AvgIntervalWidth": float(training["MeanIntervalWidth"].mean()) if "MeanIntervalWidth" in training else float("nan"),
     }
 
 
