@@ -22,6 +22,7 @@ from agents.ml_based.deep_learning.lstm_agent import LSTMAgent
 from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
 from agents.ml_based.classical.online_sgd_agent import OnlineSGDAgent
 from agents.ml_based.classical.quantile_regression_agent import QuantileRegressionAgent
+from agents.ml_based.classical.qda_agent import QDAAgent
 from agents.ml_based.deep_learning.tcn_agent import TCNAgent
 from agents.ml_based.deep_learning.transformer_agent import TransformerAgent
 from agents.ml_based.classical.svm_agent import SVMAgent
@@ -881,6 +882,52 @@ class BaseAgentsTests(unittest.TestCase):
             QuantileRegressionAgent(data, alpha=-1)
         with self.assertRaises(ValueError):
             QuantileRegressionAgent(data).train_model("AAA")
+
+    def test_qda_agent_predicts_probabilities_and_latest_live_row(self):
+        data = make_market_data(periods=100)
+        agent = QDAAgent(data, reg_param=0.3, proba_threshold=0.6)
+        signals = agent.generate_signal_strategy("AAA", mode="backtest")
+        live = agent.predict_signals("AAA", mode="live")
+        x_train, x_test, _, _ = agent.train_data["AAA"]
+
+        self.assertIn("ProbUp", signals.columns)
+        self.assertTrue(signals["ProbUp"].between(0, 1).all())
+        self.assertTrue(signals["Position"].isin([-1, 1]).all())
+        self.assertTrue((signals["Prediction"] == (signals["ProbUp"] > 0.6).map({True: 1, False: -1})).all())
+        self.assertEqual(live.index[-1], data.index[-1])
+        self.assertLess(x_train.index[-1], x_test.index[0])
+        self.assertEqual(data.index.get_loc(x_test.index[0]) - data.index.get_loc(x_train.index[-1]), 2)
+
+    def test_qda_agent_artifact_round_trip_uses_configured_threshold(self):
+        data = make_market_data(periods=100)
+        agent = QDAAgent(data, proba_threshold=0.7)
+        agent.train_model("AAA")
+        expected = agent.predict_signals("AAA", mode="backtest")
+        artifact_dir = Path("outputs") / f"qda_artifact_test_{uuid.uuid4().hex}"
+
+        try:
+            agent.save_model_artifact("AAA", artifact_dir)
+            restored = QDAAgent(data, proba_threshold=0.7)
+            restored.load_model_artifact(artifact_dir, trusted=True)
+            actual = restored.predict_signals("AAA", mode="backtest")
+            np.testing.assert_allclose(actual["ProbUp"], expected["ProbUp"])
+            self.assertListEqual(actual["Position"].tolist(), expected["Position"].tolist())
+        finally:
+            if artifact_dir.exists():
+                for artifact_file in artifact_dir.iterdir():
+                    artifact_file.unlink()
+                artifact_dir.rmdir()
+
+    def test_qda_agent_validates_parameters(self):
+        data = make_market_data(periods=30)
+        with self.assertRaises(ValueError):
+            QDAAgent(data, reg_param=-0.1)
+        with self.assertRaises(ValueError):
+            QDAAgent(data, reg_param=1.1)
+        with self.assertRaises(ValueError):
+            QDAAgent(data, proba_threshold=1.0)
+        with self.assertRaises(ValueError):
+            QDAAgent(data, timing="intraday")
 
     def test_hmm_agent_uses_explicit_train_predict_flow(self):
         data = make_market_data(periods=12)
