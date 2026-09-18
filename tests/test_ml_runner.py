@@ -66,6 +66,14 @@ class MLRunnerTests(unittest.TestCase):
         self.assertEqual(agent.proba_threshold, 0.65)
         self.assertIn("qda", parse_agent_names("classical"))
 
+    def test_build_agent_supports_spline_logistic(self):
+        data = make_synthetic_ohlcv(["AAA"], periods=100)
+        agent = build_agent("spline_logistic", data, Namespace(proba_threshold=0.65))
+
+        self.assertEqual(agent.algorithm_name, "SplineLogistic")
+        self.assertEqual(agent.proba_threshold, 0.65)
+        self.assertIn("spline_logistic", parse_agent_names("classical"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,7 @@ from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
 from agents.ml_based.classical.online_sgd_agent import OnlineSGDAgent
 from agents.ml_based.classical.quantile_regression_agent import QuantileRegressionAgent
 from agents.ml_based.classical.qda_agent import QDAAgent
+from agents.ml_based.classical.spline_logistic_agent import SplineLogisticAgent
 from agents.ml_based.classical.svm_agent import SVMAgent
 from agents.ml_based.clustering.clustering_agent import ClusteringFilteredKNNAgent
 from agents.ml_based.deep_learning.cnn_agent import CNNAgent
@@ -47,6 +48,7 @@ AGENT_ORDER = [
     "online_sgd",
     "quantile_regression",
     "qda",
+    "spline_logistic",
     "clustering_knn",
     "hmm_regime",
     "autoencoder",
@@ -59,7 +61,7 @@ AGENT_ORDER = [
 ]
 
 AGENT_GROUPS = {
-    "classical": ["logistic_reg", "naive_bayes", "svm", "knn", "online_sgd", "gaussian_process", "quantile_regression", "qda"],
+    "classical": ["logistic_reg", "naive_bayes", "svm", "knn", "online_sgd", "gaussian_process", "quantile_regression", "qda", "spline_logistic"],
     "lightweight": ["logistic_reg", "naive_bayes", "svm", "knn", "online_sgd"],
     "specialized": ["clustering_knn", "hmm_regime", "autoencoder"],
     "deep": ["dense_nn", "cnn", "lstm", "lstm_attention", "tcn", "transformer"],
@@ -118,6 +120,8 @@ def build_agent(agent_name, price_df, args):
         return QuantileRegressionAgent(price_df)
     if agent_name == "qda":
         return QDAAgent(price_df, proba_threshold=args.proba_threshold)
+    if agent_name == "spline_logistic":
+        return SplineLogisticAgent(price_df, proba_threshold=args.proba_threshold)
     if agent_name == "clustering_knn":
         return ClusteringFilteredKNNAgent(price_df)
     if agent_name == "hmm_regime":
