@@ -12,6 +12,7 @@ if str(repo_root) not in sys.path:
 import pandas as pd
 
 from agents.ml_based.anomaly.autoencoder_agent import AutoencoderAgent
+from agents.ml_based.anomaly.one_class_svm_agent import OneClassSVMAgent
 from agents.ml_based.classical.gaussian_process_agent import GaussianProcessAgent
 from agents.ml_based.classical.knn_agent import KNNAgent
 from agents.ml_based.classical.logistic_reg_agent import LRAgent
@@ -52,6 +53,7 @@ AGENT_ORDER = [
     "clustering_knn",
     "hmm_regime",
     "autoencoder",
+    "one_class_svm",
     "dense_nn",
     "cnn",
     "lstm",
@@ -63,7 +65,7 @@ AGENT_ORDER = [
 AGENT_GROUPS = {
     "classical": ["logistic_reg", "naive_bayes", "svm", "knn", "online_sgd", "gaussian_process", "quantile_regression", "qda", "spline_logistic"],
     "lightweight": ["logistic_reg", "naive_bayes", "svm", "knn", "online_sgd"],
-    "specialized": ["clustering_knn", "hmm_regime", "autoencoder"],
+    "specialized": ["clustering_knn", "hmm_regime", "autoencoder", "one_class_svm"],
     "deep": ["dense_nn", "cnn", "lstm", "lstm_attention", "tcn", "transformer"],
     "all": AGENT_ORDER,
 }
@@ -128,6 +130,8 @@ def build_agent(agent_name, price_df, args):
         return HMMRegimeAgent(price_df)
     if agent_name == "autoencoder":
         return AutoencoderAgent(price_df, epochs=args.epochs, verbose=args.verbose)
+    if agent_name == "one_class_svm":
+        return OneClassSVMAgent(price_df)
     if agent_name == "dense_nn":
         return DenseNNAgent(price_df)
     if agent_name == "cnn":
@@ -206,6 +210,8 @@ def build_agent_summary(agent_name, agent, recs, failures):
         "AvgMAE": float(training["MAE"].mean()) if "MAE" in training else float("nan"),
         "AvgIntervalCoverage": float(training["IntervalCoverage"].mean()) if "IntervalCoverage" in training else float("nan"),
         "AvgIntervalWidth": float(training["MeanIntervalWidth"].mean()) if "MeanIntervalWidth" in training else float("nan"),
+        "AvgTestAnomalyRate": float(training["TestAnomalyRate"].mean()) if "TestAnomalyRate" in training else float("nan"),
+        "LatestAnomalyCount": int(recs["Anomaly"].sum()) if "Anomaly" in recs else 0,
     }
 
 

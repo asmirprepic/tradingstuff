@@ -21,6 +21,7 @@ ML_TYPE_MODULES = {
     "anomaly": (
         "autoencoder_agent",
         "lstm_anomaly_agent",
+        "one_class_svm_agent",
         "variational_encoder_agent",
     ),
     "classical": (
@@ -62,6 +63,7 @@ _KEEP_AGENT_SPECS = {
     "LSTMAttentionAgent": ("agents.ml_based.deep_learning.lstm_attention_agent", "LSTMAttentionAgent"),
     "NaiveBayesAgent": ("agents.ml_based.classical.naive_bayes_agent", "NaiveBayesAgent"),
     "OnlineSGDAgent": ("agents.ml_based.classical.online_sgd_agent", "OnlineSGDAgent"),
+    "OneClassSVMAgent": ("agents.ml_based.anomaly.one_class_svm_agent", "OneClassSVMAgent"),
     "QuantileRegressionAgent": ("agents.ml_based.classical.quantile_regression_agent", "QuantileRegressionAgent"),
     "QDAAgent": ("agents.ml_based.classical.qda_agent", "QDAAgent"),
     "SplineLogisticAgent": ("agents.ml_based.classical.spline_logistic_agent", "SplineLogisticAgent"),

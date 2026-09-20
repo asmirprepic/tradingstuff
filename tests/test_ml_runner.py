@@ -74,6 +74,13 @@ class MLRunnerTests(unittest.TestCase):
         self.assertEqual(agent.proba_threshold, 0.65)
         self.assertIn("spline_logistic", parse_agent_names("classical"))
 
+    def test_build_agent_supports_one_class_svm(self):
+        data = make_synthetic_ohlcv(["AAA"], periods=100)
+        agent = build_agent("one_class_svm", data, Namespace())
+
+        self.assertEqual(agent.algorithm_name, "OneClassSVM")
+        self.assertIn("one_class_svm", parse_agent_names("specialized"))
+
 
 if __name__ == "__main__":
     unittest.main()

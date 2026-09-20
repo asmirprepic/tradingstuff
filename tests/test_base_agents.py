@@ -11,6 +11,7 @@ from agents.base_agents.nn_based_agent import NNBasedAgent
 from agents.base_agents.sequential_based import SequentialNNAgent
 from agents.ml_based.anomaly.autoencoder_agent import AutoencoderAgent
 from agents.ml_based.anomaly.lstm_anomaly_agent import LSTMAnomalyAgent
+from agents.ml_based.anomaly.one_class_svm_agent import OneClassSVMAgent
 from agents.ml_based.deep_learning.cnn_agent import CNNAgent
 from agents.ml_based.clustering.clustering_agent import ClusteringFilteredKNNAgent
 from agents.ml_based.deep_learning.lstm_attention_agent import LSTMAttentionAgent
@@ -973,6 +974,68 @@ class BaseAgentsTests(unittest.TestCase):
             SplineLogisticAgent(data, proba_threshold=1.0)
         with self.assertRaises(ValueError):
             SplineLogisticAgent(data, timing="intraday")
+
+    def test_one_class_svm_flags_late_shock_without_trade_direction(self):
+        data = make_market_data(periods=100)
+        data.loc[data.index[-1], ("AAA", "Close")] *= 1.5
+        agent = OneClassSVMAgent(data)
+        agent.train_model("AAA")
+        live = agent.predict_signals("AAA", mode="live")
+
+        self.assertEqual(live.index[-1], data.index[-1])
+        self.assertTrue(bool(live.iloc[-1]["Anomaly"]))
+        self.assertGreater(live.iloc[-1]["SignalStrength"], 0)
+        self.assertEqual(live.iloc[-1]["Position"], 0)
+        self.assertEqual(live.iloc[-1]["Signal"], 0)
+        self.assertIn("TestAnomalyRate", agent.training_summary("AAA").columns)
+
+    def test_one_class_svm_threshold_uses_training_rows_only(self):
+        baseline = make_market_data(periods=100)
+        shocked = baseline.copy()
+        shocked.loc[shocked.index[-1], ("AAA", "Close")] *= 1.5
+        regular_agent = OneClassSVMAgent(baseline)
+        shocked_agent = OneClassSVMAgent(shocked)
+
+        regular_agent.train_model("AAA")
+        shocked_agent.train_model("AAA")
+
+        self.assertEqual(regular_agent.thresholds["AAA"], shocked_agent.thresholds["AAA"])
+        pd.testing.assert_frame_equal(regular_agent.train_data["AAA"][0], shocked_agent.train_data["AAA"][0])
+        np.testing.assert_allclose(
+            regular_agent.models["AAA"].named_steps["scaler"].mean_,
+            shocked_agent.models["AAA"].named_steps["scaler"].mean_,
+        )
+
+    def test_one_class_svm_artifact_round_trip(self):
+        data = make_market_data(periods=100)
+        agent = OneClassSVMAgent(data)
+        agent.train_model("AAA")
+        expected = agent.predict_signals("AAA", mode="backtest")
+        artifact_dir = Path("outputs") / f"one_class_svm_artifact_test_{uuid.uuid4().hex}"
+
+        try:
+            agent.save_model_artifact("AAA", artifact_dir)
+            restored = OneClassSVMAgent(data)
+            restored.load_model_artifact(artifact_dir, trusted=True)
+            actual = restored.predict_signals("AAA", mode="backtest")
+            np.testing.assert_allclose(actual["AnomalyScore"], expected["AnomalyScore"])
+            self.assertEqual(restored.thresholds["AAA"], agent.thresholds["AAA"])
+        finally:
+            if artifact_dir.exists():
+                for artifact_file in artifact_dir.iterdir():
+                    artifact_file.unlink()
+                artifact_dir.rmdir()
+
+    def test_one_class_svm_validates_parameters_and_sample_size(self):
+        data = make_market_data(periods=20)
+        with self.assertRaises(ValueError):
+            OneClassSVMAgent(data, nu=0)
+        with self.assertRaises(ValueError):
+            OneClassSVMAgent(data, alert_percentile=100)
+        with self.assertRaises(ValueError):
+            OneClassSVMAgent(data, split_ratio=1)
+        with self.assertRaises(ValueError):
+            OneClassSVMAgent(data).train_model("AAA")
 
     def test_hmm_agent_uses_explicit_train_predict_flow(self):
         data = make_market_data(periods=12)

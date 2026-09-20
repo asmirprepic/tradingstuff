@@ -112,6 +112,7 @@ def evaluations_from_agent(agent, persistence=1, min_score=None, top_n=None, sav
         extra_cols = [
             "SignalStrength", "Momentum", "ExpectedReturnLower",
             "ExpectedReturnMedian", "ExpectedReturnUpper", "IntervalWidth",
+            "AnomalyScore", "AnomalyThreshold",
         ]
         score_col = getattr(agent, "score_column", None)
         if score_col and score_col not in extra_cols:
@@ -123,6 +124,9 @@ def evaluations_from_agent(agent, persistence=1, min_score=None, top_n=None, sav
                     latest_features[col] = float(latest.get(col))
                 except Exception:
                     latest_features[col] = None
+
+        if "Anomaly" in signals.columns:
+            latest_features["Anomaly"] = bool(latest.get("Anomaly", False))
 
         rows.append({
             'Stock': stock,
