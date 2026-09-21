@@ -52,6 +52,26 @@ python -m scripts.run_technical_agents --agents all --tickers-file tickers.txt -
 - `technical_agent_family_summary.csv`: grouped rollup by strategy family.
 - `technical_agent_shortlist.csv`: tiered shortlist with family counts and conflict flags.
 
+### `run_data_quality.py`
+
+Audit OHLCV histories before running technical or ML agents. The report assigns
+`Pass`, `Warning`, or `Reject` and records missing values, invalid OHLC rows,
+bad volume, stale closes, extreme returns, duplicate timestamps, and short histories.
+
+```bash
+python -m scripts.run_data_quality --tickers-file tickers.txt --lookback-days 260
+python -m scripts.run_technical_agents --tickers-file data_quality_approved_tickers.csv --agents all
+python -m scripts.run_ml_agents --tickers-file data_quality_approved_tickers.csv --agents classical
+```
+
+Add `--include-warnings` if warning-status tickers should remain in the approved file.
+
+**Output:**
+
+- `data_quality_report.csv`: full audit with issue counts and quality scores.
+- `data_quality_approved_tickers.csv`: ticker input for subsequent runners.
+- `data_quality_manifest.json`: thresholds, status counts, and output paths.
+
 ### `technical_dashboard.py`
 
 Build a self-contained HTML dashboard from the technical-agent CSV outputs.
