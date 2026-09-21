@@ -34,7 +34,13 @@ outputs/recommendations/*.csv
 outputs/backtest_results/*.json
 outputs/backtest_results/*.csv
 outputs/logs/
+outputs/models*/
 plots/
+
+# Executable Model Artifacts
+*.joblib
+*.keras
+*.h5
 
 # Data Cache (can be re-generated from APIs)
 data/stock_data/

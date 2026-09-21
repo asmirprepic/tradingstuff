@@ -4,6 +4,30 @@ This directory contains scripts to fetch stock tickers and generate trading reco
 
 ## Scripts
 
+### `trading_cli.py`
+
+Use one small entry point for the main workflow commands. Options after the
+subcommand are passed to the existing runner unchanged.
+
+```bash
+python -m scripts.trading_cli quality --tickers-file tickers.txt --lookback-days 260
+python -m scripts.trading_cli technical --tickers-file data_quality_approved_tickers.csv --agents all
+python -m scripts.trading_cli ml --tickers-file data_quality_approved_tickers.csv --agents classical
+python -m scripts.trading_cli dashboard --latest-manifest-dir .
+```
+
+Use `python -m scripts.trading_cli --help` for the command list, or append
+`--help` after a command for that runner's full options.
+
+### `trading_gui.py`
+
+Launch a small desktop window with command, ticker, agent, and data controls plus
+a live output pane:
+
+```bash
+python -m scripts.trading_gui
+```
+
 ### `get_tickers.py`
 
 Fetch stock tickers from Yahoo Finance and save to file.
