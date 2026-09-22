@@ -8,3 +8,4 @@ arch
 scikit-learn
 cvxpy
 openpyxl
+rich

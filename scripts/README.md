@@ -6,8 +6,19 @@ This directory contains scripts to fetch stock tickers and generate trading reco
 
 ### `trading_cli.py`
 
-Use one small entry point for the main workflow commands. Options after the
-subcommand are passed to the existing runner unchanged.
+Open the full-screen CMD dashboard:
+
+```bash
+python -m scripts.trading_cli
+```
+
+Use the arrow keys to select a tool, Enter to configure and run it, and `Q` to
+quit. Tickers and agents open in scrollable selectors: arrows move, Space
+toggles, `A` selects all, `N` selects none, Enter accepts, and `B` returns.
+You can also open the dashboard explicitly with `python -m scripts.trading_cli menu`.
+
+For direct commands, options after the subcommand are passed to the existing
+runner unchanged.
 
 ```bash
 python -m scripts.trading_cli quality --tickers-file tickers.txt --lookback-days 260
@@ -18,15 +29,6 @@ python -m scripts.trading_cli dashboard --latest-manifest-dir .
 
 Use `python -m scripts.trading_cli --help` for the command list, or append
 `--help` after a command for that runner's full options.
-
-### `trading_gui.py`
-
-Launch a small desktop window with command, ticker, agent, and data controls plus
-a live output pane:
-
-```bash
-python -m scripts.trading_gui
-```
 
 ### `get_tickers.py`
 
