@@ -94,9 +94,35 @@ class TradingCLITests(unittest.TestCase):
     def test_scroll_selector_supports_back_and_renders_controls(self):
         console = Console(record=True, width=100, color_system=None)
         console.print(render_selector("TICKERS", ["AAA", "BBB"], {0}, 0, 0))
-        self.assertIn("SPACE toggle", console.export_text())
+        rendered = console.export_text()
+        self.assertIn("SPACE toggle", rendered)
+        self.assertIn("/ search", rendered)
+        self.assertIn("[x] AAA", rendered)
         quiet_console = Console(file=StringIO(), force_terminal=True, width=100)
         self.assertIsNone(select_items("TICKERS", ["AAA"], console=quiet_console, key_reader=lambda: "B"))
+
+    def test_scroll_selector_search_toggles_matching_original_item(self):
+        keys = iter(["/", "SPACE", "ENTER"])
+        console = Console(file=StringIO(), force_terminal=True, width=100)
+
+        selected = select_items(
+            "AGENTS",
+            ["momentum", "rsi", "vwap"],
+            initially_selected=["momentum", "rsi", "vwap"],
+            console=console,
+            key_reader=lambda: next(keys),
+            search_input_fn=lambda _: "rsi",
+        )
+
+        self.assertEqual(selected, ["momentum", "vwap"])
+
+    def test_render_selector_shows_empty_search_result(self):
+        console = Console(record=True, width=100, color_system=None)
+        console.print(render_selector("TICKERS", ["AAA", "BBB"], set(), 0, 0, query="ZZZ"))
+        rendered = console.export_text()
+
+        self.assertIn("No matches", rendered)
+        self.assertIn("Filter: ZZZ", rendered)
 
 
 if __name__ == "__main__":

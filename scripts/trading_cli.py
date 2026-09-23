@@ -143,26 +143,37 @@ def render_terminal_dashboard(selected=0, status="READY"):
     )
 
 
-def render_selector(title, items, selected, cursor, offset, page_size=12):
+def _matching_indices(items, query):
+    normalized = query.strip().casefold()
+    if not normalized:
+        return list(range(len(items)))
+    return [index for index, item in enumerate(items) if normalized in str(item).casefold()]
+
+
+def render_selector(title, items, selected, cursor, offset, page_size=12, query=""):
     table = Table.grid(expand=True)
     table.add_column(width=4)
     table.add_column(ratio=1)
-    visible = items[offset:offset + page_size]
-    for row_index, item in enumerate(visible, start=offset):
-        active = row_index == cursor
-        marker = "[x]" if row_index in selected else "[ ]"
+    matches = _matching_indices(items, query)
+    visible_indices = matches[offset:offset + page_size]
+    for visible_position, item_index in enumerate(visible_indices, start=offset):
+        active = visible_position == cursor
+        marker = "[x]" if item_index in selected else "[ ]"
         style = "bold white on #285244" if active else "#c6d6cf"
-        table.add_row(marker, Text(str(item), style=style), style=style)
-    for _ in range(page_size - len(visible)):
+        table.add_row(Text(marker, style=style), Text(str(items[item_index]), style=style), style=style)
+    if not matches:
+        table.add_row("", Text("No matches", style="italic dim"))
+    for _ in range(page_size - max(1 if not matches else 0, len(visible_indices))):
         table.add_row("", "")
 
-    position = f"{cursor + 1}/{len(items)}" if items else "0/0"
+    position = f"{cursor + 1}/{len(matches)}" if matches else "0/0"
+    filter_text = f"Filter: {query}" if query else "Filter: all"
     return Panel(
         Group(
             Text(title, style="bold #f0a06b"),
-            Text(f"Selected {len(selected)} of {len(items)}", style="dim"),
+            Text(f"Selected {len(selected)} of {len(items)}  |  {filter_text}", style="dim"),
             table,
-            Text("ARROWS scroll   SPACE toggle   A all   N none   ENTER accept   B back", style="bold"),
+            Text("/ search   C clear   ARROWS scroll   SPACE toggle   A/N matches   ENTER accept   B back", style="bold"),
         ),
         title="[bold]SELECTOR[/]",
         subtitle=position,
@@ -171,49 +182,71 @@ def render_selector(title, items, selected, cursor, offset, page_size=12):
     )
 
 
-def select_items(title, items, initially_selected=None, console=None, key_reader=None, page_size=12):
+def select_items(
+    title,
+    items,
+    initially_selected=None,
+    console=None,
+    key_reader=None,
+    search_input_fn=None,
+    page_size=12,
+):
     items = list(dict.fromkeys(items))
     if not items:
         return []
     console = console or Console()
     key_reader = key_reader or _read_key
+    search_input_fn = search_input_fn or console.input
     initial_values = set(initially_selected) if initially_selected is not None else None
     selected = set(range(len(items))) if initial_values is None else {
         index for index, item in enumerate(items) if item in initial_values
     }
     cursor = 0
     offset = 0
+    query = ""
     with Live(
-        render_selector(title, items, selected, cursor, offset, page_size),
+        render_selector(title, items, selected, cursor, offset, page_size, query),
         console=console,
         screen=True,
         auto_refresh=False,
     ) as live:
         while True:
-            live.update(render_selector(title, items, selected, cursor, offset, page_size), refresh=True)
+            matches = _matching_indices(items, query)
+            live.update(render_selector(title, items, selected, cursor, offset, page_size, query), refresh=True)
             key = key_reader()
             if key in ("B", "ESC", "Q"):
                 return None
             if key == "UP":
                 cursor = max(0, cursor - 1)
             elif key == "DOWN":
-                cursor = min(len(items) - 1, cursor + 1)
+                cursor = min(max(0, len(matches) - 1), cursor + 1)
             elif key == "PGUP":
                 cursor = max(0, cursor - page_size)
             elif key == "PGDN":
-                cursor = min(len(items) - 1, cursor + page_size)
-            elif key == "SPACE":
-                if cursor in selected:
-                    selected.remove(cursor)
+                cursor = min(max(0, len(matches) - 1), cursor + page_size)
+            elif key == "SPACE" and matches:
+                item_index = matches[cursor]
+                if item_index in selected:
+                    selected.remove(item_index)
                 else:
-                    selected.add(cursor)
+                    selected.add(item_index)
             elif key == "A":
-                selected = set(range(len(items)))
+                selected.update(matches)
             elif key == "N":
-                selected.clear()
+                selected.difference_update(matches)
+            elif key == "/":
+                live.stop()
+                query = search_input_fn("Search (empty shows all): ").strip()
+                cursor = 0
+                offset = 0
+                live.start(refresh=True)
+            elif key == "C":
+                query = ""
+                cursor = 0
+                offset = 0
             elif key == "ENTER":
                 return [item for index, item in enumerate(items) if index in selected]
-            offset = min(max(0, cursor - page_size + 1), max(0, len(items) - page_size))
+            offset = min(max(0, cursor - page_size + 1), max(0, len(matches) - page_size))
 def _read_key():
     if os.name == "nt":
         import msvcrt
