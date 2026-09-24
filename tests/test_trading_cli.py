@@ -2,16 +2,19 @@ import unittest
 from io import StringIO
 from unittest.mock import Mock, patch
 
+import pandas as pd
 from rich.console import Console
 
 from scripts.trading_cli import (
     build_parser,
     build_runner_args,
+    choose_ticker_universe,
     dispatch,
     main,
     render_selector,
     render_terminal_dashboard,
     select_items,
+    ticker_groups,
     terminal_dashboard,
 )
 
@@ -123,6 +126,48 @@ class TradingCLITests(unittest.TestCase):
 
         self.assertIn("No matches", rendered)
         self.assertIn("Filter: ZZZ", rendered)
+
+    def test_ticker_groups_extracts_quality_and_shortlist_groups(self):
+        frame = pd.DataFrame(
+            [
+                {"Stock": "AAA", "Status": "Pass", "ShortlistTier": "TierA"},
+                {"Stock": "BBB", "Status": "Warning", "ShortlistTier": "TierC"},
+            ]
+        )
+
+        groups = ticker_groups(frame)
+
+        self.assertEqual(groups["Status"]["Pass"], ["AAA"])
+        self.assertEqual(groups["ShortlistTier"]["TierC"], ["BBB"])
+
+    def test_large_universe_can_be_used_without_browsing_tickers(self):
+        console = Console(file=StringIO(), force_terminal=True, width=100)
+        with patch("scripts.trading_cli._ticker_choices", return_value=[f"T{i}" for i in range(700)]), patch(
+            "scripts.trading_cli._groups_for_universe", return_value={}
+        ):
+            result = choose_ticker_universe(
+                "tickers.txt",
+                console=console,
+                key_reader=lambda: "ENTER",
+            )
+
+        self.assertEqual(result, "tickers.txt")
+
+    def test_quality_csv_defaults_to_pass_group(self):
+        keys = iter(["DOWN", "ENTER", "ENTER"])
+        console = Console(file=StringIO(), force_terminal=True, width=100)
+        groups = {"Status": {"Pass": ["AAA"], "Warning": ["BBB"]}}
+        tickers = ["AAA", "BBB"] + [f"T{i}" for i in range(29)]
+        with patch("scripts.trading_cli._ticker_choices", return_value=tickers), patch(
+            "scripts.trading_cli._groups_for_universe", return_value=groups
+        ):
+            result = choose_ticker_universe(
+                "quality.csv",
+                console=console,
+                key_reader=lambda: next(keys),
+            )
+
+        self.assertEqual(result, "AAA")
 
 
 if __name__ == "__main__":

@@ -247,6 +247,120 @@ def select_items(
             elif key == "ENTER":
                 return [item for index, item in enumerate(items) if index in selected]
             offset = min(max(0, cursor - page_size + 1), max(0, len(matches) - page_size))
+
+
+def select_one(title, options, console=None, key_reader=None):
+    options = list(options)
+    if not options:
+        return None
+    console = console or Console()
+    key_reader = key_reader or _read_key
+    cursor = 0
+    with Live(
+        render_selector(title, options, {cursor}, cursor, 0, page_size=min(12, len(options))),
+        console=console,
+        screen=True,
+        auto_refresh=False,
+    ) as live:
+        while True:
+            live.update(
+                render_selector(title, options, {cursor}, cursor, 0, page_size=min(12, len(options))),
+                refresh=True,
+            )
+            key = key_reader()
+            if key in ("B", "ESC", "Q"):
+                return None
+            if key == "UP":
+                cursor = max(0, cursor - 1)
+            elif key == "DOWN":
+                cursor = min(len(options) - 1, cursor + 1)
+            elif key == "ENTER":
+                return options[cursor]
+
+
+def ticker_groups(frame):
+    ticker_column = next(
+        (column for column in ("Stock", "Ticker", "ticker", "Tickers", "tickers") if column in frame.columns),
+        frame.columns[0] if len(frame.columns) else None,
+    )
+    if ticker_column is None:
+        return {}
+    group_columns = [
+        column for column in ("Status", "ShortlistTier", "Sector", "Industry", "MarketCapGroup")
+        if column in frame.columns
+    ]
+    groups = {}
+    for group_column in group_columns:
+        values = {}
+        valid = frame.dropna(subset=[ticker_column, group_column])
+        for name, group in valid.groupby(group_column, sort=True):
+            values[str(name)] = group[ticker_column].astype(str).drop_duplicates().tolist()
+        if values:
+            groups[group_column] = values
+    return groups
+
+
+def _groups_for_universe(universe):
+    if not universe.lower().endswith(".csv") or not os.path.exists(os.path.expanduser(universe)):
+        return {}
+    import pandas as pd
+
+    return ticker_groups(pd.read_csv(os.path.expanduser(universe)))
+
+
+def choose_ticker_universe(universe, console=None, key_reader=None):
+    console = console or Console()
+    key_reader = key_reader or _read_key
+    tickers = _ticker_choices(universe)
+    if not tickers:
+        return universe
+    if len(tickers) <= 30:
+        selected = select_items(
+            "TICKERS", tickers, initially_selected=tickers, console=console, key_reader=key_reader
+        )
+        if selected is None:
+            raise BackRequested
+        return universe if len(selected) == len(tickers) else ",".join(selected)
+
+    groups = _groups_for_universe(universe)
+    actions = [f"Use all {len(tickers)} tickers"]
+    actions.extend(f"Filter by {column}" for column in groups)
+    actions.extend(("Browse individual tickers", "Back"))
+    action = select_one("TICKER UNIVERSE", actions, console=console, key_reader=key_reader)
+    if action is None or action == "Back":
+        raise BackRequested
+    if action.startswith("Use all"):
+        return universe
+    if action == "Browse individual tickers":
+        selected = select_items(
+            "TICKERS", tickers, initially_selected=tickers, console=console, key_reader=key_reader
+        )
+        if selected is None:
+            raise BackRequested
+        return universe if len(selected) == len(tickers) else ",".join(selected)
+
+    group_column = action.removeprefix("Filter by ")
+    group_values = groups[group_column]
+    default_groups = ["Pass"] if "Pass" in group_values else list(group_values)
+    selected_groups = select_items(
+        group_column.upper(),
+        list(group_values),
+        initially_selected=default_groups,
+        console=console,
+        key_reader=key_reader,
+    )
+    if selected_groups is None:
+        raise BackRequested
+    selected_set = set(selected_groups)
+    allowed_tickers = {
+        ticker for group in selected_set for ticker in group_values[group]
+    }
+    selected_tickers = [ticker for ticker in tickers if ticker in allowed_tickers]
+    if not selected_tickers:
+        raise BackRequested
+    return ",".join(selected_tickers)
+
+
 def _read_key():
     if os.name == "nt":
         import msvcrt
@@ -321,19 +435,7 @@ def _configure_tool(command, console, key_reader=None):
     else:
         default_universe = "my_tickers.txt" if os.path.exists("my_tickers.txt") else "AAPL,MSFT,NVDA"
         universe = _prompt(console.input, "Tickers or ticker-file path", default_universe)
-        ticker_choices = _ticker_choices(universe)
-        if ticker_choices:
-            chosen_tickers = select_items(
-                "TICKERS",
-                ticker_choices,
-                initially_selected=ticker_choices,
-                console=console,
-                key_reader=key_reader,
-            )
-            if chosen_tickers is None:
-                raise BackRequested
-            if len(chosen_tickers) != len(ticker_choices):
-                universe = ",".join(chosen_tickers)
+        universe = choose_ticker_universe(universe, console=console, key_reader=key_reader)
         synthetic = _prompt(console.input, "Use synthetic data? y/n", "n").lower() in ("y", "yes")
         lookback = "260" if synthetic else _prompt(console.input, "Lookback business days", "260")
         agents = ""

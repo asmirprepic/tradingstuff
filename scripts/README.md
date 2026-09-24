@@ -17,6 +17,10 @@ quit. Tickers and agents open in scrollable selectors: arrows move, Space
 toggles, `A` selects all, `N` selects none, Enter accepts, and `B` returns.
 Press `/` to search the current list and `C` to clear the filter. `A` and `N`
 apply only to the current search matches when a filter is active.
+Large ticker files first open a universe screen, where the entire file can be
+accepted without browsing hundreds of rows. CSV files can also be filtered by
+`Status`, `ShortlistTier`, `Sector`, `Industry`, or `MarketCapGroup` when those
+columns are present.
 You can also open the dashboard explicitly with `python -m scripts.trading_cli menu`.
 
 For direct commands, options after the subcommand are passed to the existing
