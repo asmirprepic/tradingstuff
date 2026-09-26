@@ -1,7 +1,13 @@
 import argparse
+import contextlib
 import os
+import queue
+import re
 import shlex
 import sys
+import threading
+import time
+from collections import deque
 from importlib import import_module
 
 from rich.align import Align
@@ -421,6 +427,152 @@ def _ticker_choices(universe):
     return [ticker.strip() for ticker in universe.split(",") if ticker.strip()]
 
 
+def _argument_value(arguments, option, default=""):
+    try:
+        return arguments[arguments.index(option) + 1]
+    except (ValueError, IndexError):
+        return default
+
+
+def _run_scope(command, arguments):
+    ticker_source = _argument_value(arguments, "--tickers") or _argument_value(arguments, "--tickers-file")
+    try:
+        ticker_count = len(_ticker_choices(ticker_source)) if ticker_source else None
+    except (OSError, ValueError):
+        ticker_count = None
+    agents = []
+    requested = _argument_value(arguments, "--agents")
+    if command in ("technical", "ml") and requested:
+        available, _ = _available_agents(command)
+        if requested == "all":
+            agents = available
+        elif command == "ml" and requested in import_module("scripts.run_ml_agents").AGENT_GROUPS:
+            agents = list(import_module("scripts.run_ml_agents").AGENT_GROUPS[requested])
+        else:
+            agents = [name.strip() for name in requested.split(",") if name.strip()]
+    return ticker_count, agents
+
+
+class _QueueWriter:
+    def __init__(self, output_queue):
+        self.output_queue = output_queue
+        self.pending = ""
+
+    def write(self, value):
+        self.pending += value
+        while "\n" in self.pending:
+            line, self.pending = self.pending.split("\n", 1)
+            if line.strip():
+                self.output_queue.put(line.strip())
+        return len(value)
+
+    def flush(self):
+        if self.pending.strip():
+            self.output_queue.put(self.pending.strip())
+        self.pending = ""
+
+
+def _new_run_state(command, arguments):
+    ticker_count, agents = _run_scope(command, arguments)
+    return {
+        "command": command, "ticker_count": ticker_count, "agents": agents,
+        "current_agent": None, "completed_agents": 0, "phase": "Starting runner",
+        "outputs": [], "activity": deque(maxlen=7), "elapsed": 0.0,
+    }
+
+
+def update_run_state(state, line):
+    clean = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", str(line)).strip()
+    if not clean:
+        return
+    state["activity"].append(clean)
+    running = re.match(r"Running\s+(.+?)(?:\.\.\.|$)", clean, re.IGNORECASE)
+    if running:
+        agent = running.group(1).strip()
+        if state["current_agent"] and agent != state["current_agent"]:
+            state["completed_agents"] += 1
+        state["current_agent"] = agent
+        state["phase"] = "Running model" if state["command"] == "ml" else "Calculating signals"
+    elif clean.lower().startswith("fetching"):
+        state["phase"] = "Fetching market data"
+    elif "synthetic" in clean.lower():
+        state["phase"] = "Preparing synthetic data"
+    elif clean.lower().startswith("model performance"):
+        state["phase"] = "Evaluating model"
+    elif clean.lower().startswith("wrote "):
+        output = clean[6:].strip()
+        if output not in state["outputs"]:
+            state["outputs"].append(output)
+        state["phase"] = "Writing results"
+    elif any(word in clean.lower() for word in ("summary", "consensus", "shortlist")):
+        state["phase"] = "Building summaries"
+
+
+def render_run_status(state, finished=False, error=None):
+    facts = Table.grid(expand=True, padding=(0, 2))
+    facts.add_column(style="dim", width=14)
+    facts.add_column(style="bold #d7e4dd")
+    facts.add_row("WORKFLOW", state["command"].upper())
+    facts.add_row("PHASE", "Failed" if error else ("Complete" if finished else state["phase"]))
+    facts.add_row("ELAPSED", f"{state['elapsed']:.1f}s")
+    if state["ticker_count"] is not None:
+        facts.add_row("TICKERS", str(state["ticker_count"]))
+    if state["agents"]:
+        current = state["current_agent"] or "waiting"
+        done = min(state["completed_agents"], len(state["agents"]))
+        if finished and not error:
+            done = len(state["agents"])
+        bar_width = 20
+        filled = round(bar_width * done / len(state["agents"]))
+        facts.add_row("AGENT", current)
+        facts.add_row("PROGRESS", f"[{'#' * filled}{'.' * (bar_width - filled)}] {done}/{len(state['agents'])}")
+    if state["outputs"]:
+        facts.add_row("OUTPUTS", "\n".join(state["outputs"][-4:]))
+    activity = "\n".join(state["activity"]) or "Waiting for runner output..."
+    status = "FAILED" if error else ("COMPLETE" if finished else "RUNNING")
+    color = "red" if error else ("green" if finished else "#e66f3c")
+    body = Group(facts, Text("\nRECENT ACTIVITY", style="bold #f0a06b"), Text(activity, style="#9bada4"))
+    if error:
+        body = Group(body, Text(f"\n{error}", style="bold red"))
+    return Panel(body, title=f"[bold {color}]{status}[/]", border_style=color, padding=(1, 2))
+
+
+def run_with_status(command, arguments, dispatch_fn=dispatch, console=None, refresh_interval=0.08):
+    console = console or Console()
+    state = _new_run_state(command, arguments)
+    output_queue = queue.Queue()
+    result = {}
+
+    def worker():
+        writer = _QueueWriter(output_queue)
+        try:
+            with contextlib.redirect_stdout(writer), contextlib.redirect_stderr(writer):
+                result["value"] = dispatch_fn(command, arguments)
+        except BaseException as exc:
+            result["error"] = exc
+        finally:
+            writer.flush()
+
+    started = time.monotonic()
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    with Live(render_run_status(state), console=console, screen=True, auto_refresh=False) as live:
+        while thread.is_alive() or not output_queue.empty():
+            try:
+                while True:
+                    update_run_state(state, output_queue.get_nowait())
+            except queue.Empty:
+                pass
+            state["elapsed"] = time.monotonic() - started
+            live.update(render_run_status(state), refresh=True)
+            if thread.is_alive():
+                time.sleep(refresh_interval)
+        thread.join()
+    error = result.get("error")
+    console.print(render_run_status(state, finished=True, error=error))
+    return result.get("value"), error, state
+
+
 def _configure_tool(command, console, key_reader=None):
     console.clear()
     console.print(Panel.fit(
@@ -481,9 +633,12 @@ def terminal_dashboard(console=None, key_reader=None, dispatch_fn=dispatch):
                 live.stop()
                 try:
                     command_args = _configure_tool(command, console, key_reader=key_reader)
-                    console.print(f"\n[bold #e66f3c]RUNNING[/] {command} {' '.join(command_args)}\n")
-                    dispatch_fn(command, command_args)
-                    console.input("\n[dim]Press Enter to return to the console...[/]")
+                    _, error, _ = run_with_status(
+                        command, command_args, dispatch_fn=dispatch_fn, console=console
+                    )
+                    if error:
+                        raise error
+                    console.input("\n[dim]Run complete. Press Enter to return to the console...[/]")
                 except BackRequested:
                     pass
                 except (Exception, SystemExit) as exc:

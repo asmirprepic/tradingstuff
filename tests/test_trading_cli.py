@@ -13,9 +13,12 @@ from scripts.trading_cli import (
     main,
     render_selector,
     render_terminal_dashboard,
+    render_run_status,
+    run_with_status,
     select_items,
     ticker_groups,
     terminal_dashboard,
+    update_run_state,
 )
 
 
@@ -79,6 +82,42 @@ class TradingCLITests(unittest.TestCase):
         console = Console(file=StringIO(), force_terminal=True, width=100)
 
         self.assertEqual(terminal_dashboard(console=console, key_reader=lambda: "Q"), 0)
+
+    def test_run_status_tracks_agents_outputs_and_progress(self):
+        state = {
+            "command": "technical", "ticker_count": 3, "agents": ["momentum", "rsi"],
+            "current_agent": None, "completed_agents": 0, "phase": "Starting runner",
+            "outputs": [], "activity": __import__("collections").deque(maxlen=7), "elapsed": 1.2,
+        }
+        update_run_state(state, "Running momentum...")
+        update_run_state(state, "Running rsi...")
+        update_run_state(state, "Wrote technical_shortlist.csv")
+        console = Console(record=True, width=100, color_system=None)
+        console.print(render_run_status(state, finished=True))
+        rendered = console.export_text()
+
+        self.assertEqual(state["completed_agents"], 1)
+        self.assertEqual(state["outputs"], ["technical_shortlist.csv"])
+        self.assertIn("COMPLETE", rendered)
+        self.assertIn("2/2", rendered)
+
+    def test_run_with_status_captures_dispatch_output(self):
+        console = Console(file=StringIO(), force_terminal=True, width=100)
+
+        def fake_dispatch(command, arguments):
+            print("Running momentum...")
+            print("Wrote result.csv")
+            return 42
+
+        value, error, state = run_with_status(
+            "technical", ["--tickers", "AAA,BBB", "--agents", "momentum"],
+            dispatch_fn=fake_dispatch, console=console, refresh_interval=0,
+        )
+
+        self.assertEqual(value, 42)
+        self.assertIsNone(error)
+        self.assertEqual(state["ticker_count"], 2)
+        self.assertEqual(state["outputs"], ["result.csv"])
 
     def test_scroll_selector_toggles_and_accepts_items(self):
         keys = iter(["DOWN", "SPACE", "ENTER"])
