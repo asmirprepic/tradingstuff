@@ -1,5 +1,6 @@
 import unittest
 from argparse import Namespace
+from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
@@ -10,6 +11,7 @@ from scripts.run_ml_agents import (
     parse_agent_names,
     safe_component,
     tickers_from_shortlist,
+    write_manifest,
 )
 from scripts.run_technical_agents import make_synthetic_ohlcv
 
@@ -80,6 +82,28 @@ class MLRunnerTests(unittest.TestCase):
 
         self.assertEqual(agent.algorithm_name, "OneClassSVM")
         self.assertIn("one_class_svm", parse_agent_names("specialized"))
+
+    def test_manifest_paths_are_relative_and_portable(self):
+        args = Namespace(
+            use_synthetic=True, technical_shortlist=None, shortlist_tiers=[], start=None,
+            end=None, lookback_days=20, interval="1d", mode="backtest", persistence=1,
+            proba_threshold=0.55, epochs=1, reuse_artifacts=False, save_artifacts=False,
+            artifact_dir="outputs/models",
+        )
+        manifest_path = Path("outputs/test_ml_manifest.json")
+        try:
+            write_manifest(
+                manifest_path, "test", args, ["AAA"], ["logistic_reg"],
+                {"summary": Path("outputs/test_summary.csv").resolve()}, {}, [],
+            )
+            manifest_text = manifest_path.read_text(encoding="utf-8")
+
+            self.assertIn('"summary": "test_summary.csv"', manifest_text)
+            self.assertIn('"artifact_dir": "models"', manifest_text)
+            self.assertNotIn(str(Path.home()), manifest_text)
+        finally:
+            if manifest_path.exists():
+                manifest_path.unlink()
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -554,6 +555,15 @@ def resolve_output_path(path_str, timestamp_output, timestamp=None):
     return path_str
 
 
+def portable_manifest_path(path, manifest_path):
+    """Serialize a path relative to its manifest without exposing machine details."""
+    if not path:
+        return None
+    base_dir = Path(manifest_path).resolve().parent
+    relative = os.path.relpath(Path(path).resolve(), base_dir)
+    return Path(relative).as_posix()
+
+
 def write_run_manifest(path, run_id, args, tickers, selected_agents, output_paths, row_counts, failed_agents):
     manifest_path = Path(path).resolve()
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -578,7 +588,7 @@ def write_run_manifest(path, run_id, args, tickers, selected_agents, output_path
             "timestamp_output": args.timestamp_output,
         },
         "outputs": {
-            name: str(Path(output_path).resolve()) if output_path else None
+            name: portable_manifest_path(output_path, manifest_path)
             for name, output_path in output_paths.items()
         },
         "row_counts": row_counts,

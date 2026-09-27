@@ -30,13 +30,13 @@
     "epochs": 20,
     "reuse_artifacts": true,
     "save_artifacts": false,
-    "artifact_dir": "C:\\Users\\asmir\\Desktop\\repos\\tradingstuff\\outputs\\models_smoke"
+    "artifact_dir": "outputs/models_smoke"
   },
   "outputs": {
-    "summary": "C:\\Users\\asmir\\Desktop\\repos\\tradingstuff\\tmp_ml_reuse_summary.csv",
-    "training": "C:\\Users\\asmir\\Desktop\\repos\\tradingstuff\\tmp_ml_reuse_training.csv",
-    "recommendations": "C:\\Users\\asmir\\Desktop\\repos\\tradingstuff\\tmp_ml_reuse_recommendations.csv",
-    "artifacts": "C:\\Users\\asmir\\Desktop\\repos\\tradingstuff\\tmp_ml_reuse_artifacts.csv"
+    "summary": "tmp_ml_reuse_summary.csv",
+    "training": "tmp_ml_reuse_training.csv",
+    "recommendations": "tmp_ml_reuse_recommendations.csv",
+    "artifacts": "tmp_ml_reuse_artifacts.csv"
   },
   "row_counts": {
     "summary": 1,

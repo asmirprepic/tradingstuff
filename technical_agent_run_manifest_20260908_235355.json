@@ -25,11 +25,11 @@
     "timestamp_output": true
   },
   "outputs": {
-    "summary": "C:\\Users\\asmir\\Desktop\\repos\\tradingstuff\\technical_agent_summary_20260908_235355.csv",
-    "recommendations": "C:\\Users\\asmir\\Desktop\\repos\\tradingstuff\\technical_agent_recommendations_20260908_235355.csv",
-    "consensus": "C:\\Users\\asmir\\Desktop\\repos\\tradingstuff\\technical_agent_consensus_20260908_235355.csv",
-    "family_summary": "C:\\Users\\asmir\\Desktop\\repos\\tradingstuff\\technical_agent_family_summary_20260908_235355.csv",
-    "shortlist": "C:\\Users\\asmir\\Desktop\\repos\\tradingstuff\\technical_agent_shortlist_20260908_235355.csv"
+    "summary": "technical_agent_summary_20260908_235355.csv",
+    "recommendations": "technical_agent_recommendations_20260908_235355.csv",
+    "consensus": "technical_agent_consensus_20260908_235355.csv",
+    "family_summary": "technical_agent_family_summary_20260908_235355.csv",
+    "shortlist": "technical_agent_shortlist_20260908_235355.csv"
   },
   "row_counts": {
     "summary": 2,

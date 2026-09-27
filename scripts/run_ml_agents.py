@@ -37,6 +37,7 @@ from scripts.run_technical_agents import (
     make_synthetic_ohlcv,
     read_tickers_file,
     resolve_output_path,
+    portable_manifest_path,
 )
 
 
@@ -251,9 +252,12 @@ def write_manifest(path, run_id, args, tickers, agents, outputs, row_counts, fai
             "epochs": args.epochs,
             "reuse_artifacts": args.reuse_artifacts,
             "save_artifacts": args.save_artifacts,
-            "artifact_dir": str(Path(args.artifact_dir).resolve()),
+            "artifact_dir": portable_manifest_path(args.artifact_dir, manifest_path),
         },
-        "outputs": {name: str(value) if value else None for name, value in outputs.items()},
+        "outputs": {
+            name: portable_manifest_path(value, manifest_path)
+            for name, value in outputs.items()
+        },
         "row_counts": row_counts,
         "failures": failures,
     }

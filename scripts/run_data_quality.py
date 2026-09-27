@@ -9,6 +9,7 @@ from scripts.run_technical_agents import (
     load_price_df,
     read_tickers_file,
     resolve_output_path,
+    portable_manifest_path,
 )
 
 
@@ -77,8 +78,8 @@ def main(argv=None):
         },
         "counts": report["Status"].value_counts().to_dict(),
         "outputs": {
-            "report": str(Path(report_path).resolve()),
-            "approved_tickers": str(Path(approved_path).resolve()),
+            "report": portable_manifest_path(report_path, manifest_path),
+            "approved_tickers": portable_manifest_path(approved_path, manifest_path),
         },
     }
     Path(manifest_path).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
