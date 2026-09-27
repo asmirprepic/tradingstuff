@@ -2,173 +2,259 @@ import pandas as pd
 import requests
 import time
 import logging
+from typing import Optional, Dict, List
+from dataclasses import dataclass
 
-# Configure logging for debugging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+logging.basicConfig(level=logging.INFO, format = '%(asctime)s - %(levelname)s - %(message)s')
+logger =logging.getLogger(__name__)
+
+@dataclass
+class MarketCapRange:
+    "Market cap range min, max and label"
+    min_cap: int
+    max_cap: Optional[int]
+    label: str
 
 class GetTickers:
-    def __init__(self):
-        self.base_url = "https://query1.finance.yahoo.com/v1/finance/screener"
+    """
+    A class that gets tickers from Yahoo finance based on region and market cap
+
+    """
+    BASE_URL = "https://query1.finance.yahoo.com/v1/finance/screener"
+    CRUMB_URL = "https://query1.finance.yahoo.com/v1/test/getcrumb"
+    LANDING_PAGE = "https://finance.yahoo.com/screener"
+
+    def __init__(self, retries: int = 3):
+        """Initialize the session and fetch cookies and crumb."""
+        self.retries = retries
         self.session = requests.Session()
+        # self.session.headers.update({
+        #     'accept': '*/*',
+        #     'accept-language': 'en-US,en;q=0.9',
+        #     'content-type': 'application/json',
+        #     'origin': 'https://finance.yahoo.com',
+        #     'referer': 'https://finance.yahoo.com/screener/',
+        #     'sec-ch-ua': '"Chromium";v="136", "Microsoft Edge";v="136", "Not.A/Brand";v="99"',
+        #     'sec-ch-ua-mobile': '?0',
+        #     'sec-ch-ua-platform': '"Windows"',
+        #     'sec-fetch-dest': 'empty',
+        #     'sec-fetch-mode': 'cors',
+        #     'sec-fetch-site': 'same-site',
+        #     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0',
+        # })
+
+        self._update_headers()
+        self.cookies = None
+        self.crumb = None
+        self.market_cap_ranges = [
+            MarketCapRange(0, 150000000, 'micro_cap'),
+            MarketCapRange(150000000, 1000000000, 'micro_cap2'),
+            MarketCapRange(1000000000, 2000000000, 'small_cap'),
+            MarketCapRange(2000000000, 10000000000, 'mid_cap'),
+            MarketCapRange(10000000000, 100000000000, 'large_cap'),
+            MarketCapRange(100000000000, None, 'mega_cap'),
+        ]
+        self._initialize_session()
+
+    def _update_headers(self) -> None:
+        """Update session headers to mimic a modern browser"""
         self.session.headers.update({
-            'accept': '*/*',
-            'accept-language': 'sv,en;q=0.9,en-GB;q=0.8,en-US;q=0.7',
-            'content-type': 'application/json',
-            'origin': 'https://finance.yahoo.com',
-            'priority': 'u=1, i',
-            'referer': 'https://finance.yahoo.com/research-hub/screener/equity/?start=0&count=100',
-            'sec-ch-ua': '"Chromium";v="136", "Microsoft Edge";v="136", "Not.A/Brand";v="99"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'sec-fetch-dest': 'empty',
-            'sec-fetch-mode': 'cors',
-            'sec-fetch-site': 'same-site',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Referer': 'https://finance.yahoo.com/',
         })
-        # Hardcoded cookies from the working code
-        self.cookies = {
-            'axids': 'gam=y-7MGeQ0pE2uI.yuInyEjMPtcEn.rzB_b.~A&dv360=eS1kSGVYZXJWRTJ1RS5ScDc4ZzFvMS5fbVowMGp4bFAxY35B&ydsp=y-qPoKV4JE2uL2M1pMpFZfUm_Wj3SUM_nx~A&tbla=y-1JugxaxE2uIYyE29InWPp6rjI7cCF6kY~A',
-            'tbla_id': '9b852a0a-20a1-4582-9eea-d2e385fef4e5-tuctf08e45c',
-            'GUC': 'AQABCAFoG8JoTUIe2gSi&s=AQAAAGOJDolC&g=aBpzIQ',
-            'A1': 'd=AQABBNleD2gCEHS7uq-ClbIyaFMmZwo1rGgFEgABCAHCG2hNaPU70CMA9qMCAAcI1l4PaAtHSy0&S=AQAAAgePKUpjReX7XCXhmhs4orU',
-            'A3': 'd=AQABBNleD2gCEHS7uq-ClbIyaFMmZwo1rGgFEgABCAHCG2hNaPU70CMA9qMCAAcI1l4PaAtHSy0&S=AQAAAgePKUpjReX7XCXhmhs4orU',
-            '_yb': 'MgE0ATEBLTEBMTkxMDk2NjQ5Mw==',
-            'A1S': 'd=AQABBNleD2gCEHS7uq-ClbIyaFMmZwo1rGgFEgABCAHCG2hNaPU70CMA9qMCAAcI1l4PaAtHSy0&S=AQAAAgePKUpjReX7XCXhmhs4orU',
-            'cmp': 't=1747337279&j=1&u=1---&v=80',
-            'EuConsent': 'CQQ_SoAQQ_SoAAOACBSVBpFoAP_gAEPgACiQKptB9G7WTXFneTp2YPskOYwX0VBJ4MAwBgCBAcABzBIUIBwGVmAzJEyIICACGAIAIGBBIABtGAhAQEAAYIAFAABIAEgAIBAAIGAAACAAAABACAAAAAAAAAAQgEAXMBQgmCYEBFoIQUhAggAgAQAAAAAEAIgBCAQAEAAAQAAACAAIACgAAgAAAAAAAAAEAFAIEQAAIAECAgvkdQAAAAAAAAAIAAYACAABAAAAAIKpgAkGhUQRFgQAhEIGEECAAQUBABQIAgAACBAAAATBAUIAwAVGAiAEAIAAAAAAAAAAABAAABAAhAAEAAQIAAAAAIAAgAIBAAACAAAAAAAAAAAAAAAAAAAAAAAAAGIBAggCAABBAAQUAAAAAgAAAAAAAAAIgACAAAAAAAAAAAAAAIgAAAAAAAAAAAAAAAAAAIEAAAIAAAAoDEFgAAAAAAAAAAAAAACAABAAAAAIAAA',
-            'PRF': 't%3DDMYD-B.ST%252BTSLA%252BNVDA%252BETH-USD%252BXRP-USD',
-            '_cb': 'C3Bk9kBRMkVVDq6dop',
-            '_chartbeat2': '.1745837787699.1747339844676.1110111111011101.DddjX9CV1CaaCrxlZC9tK9LDrMc9b.7',
-            '_cb_svref': 'https%3A%2F%2Ffinance.yahoo.com%2Fquote%2FDMYD-B.ST%2F',
-        }
-        # Hardcoded crumb from the working code
-        self.crumb = 'xTwfGAEpOCr'
 
-    def _getTickers(self, region, market_cap_min=None, market_cap_max=None):
-        """Fetch tickers based on region and market cap filters."""
-        market_cap_filters = []
-        if market_cap_min is not None and market_cap_max is not None:
-            market_cap_filter = [{
-                'operator': 'btwn',
-                'operands': ['intradaymarketcap', market_cap_min, market_cap_max],
-            }]
-        elif market_cap_min is not None:
-            market_cap_filter = [{
-                'operator': 'gte',
-                'operands': ['intradaymarketcap', market_cap_min],
-            }]
-        elif market_cap_max is not None:
-            market_cap_filter = [{
-                'operator': 'lt',
-                'operands': ['intradaymarketcap', market_cap_max],
-            }]
-        else:
-            market_cap_filter = [{
-                'operator': 'gte',
-                'operands': ['intradaymarketcap', 0],
-            }]
+    def  _initialize_session_1(self) -> None:
+        """Fetches cookeis and crumb"""
+        required_cookies = {'A1','A3','GUC'}
+        for attempt in range(self.retries):
+            try:
+                logger.info(f"Fetching cookies from {self.LANDING_PAGE}")
+                response = self.session.get(self.LANDING_PAGE)
+                response.raise_for_status()
+                self.cookies = self.session.cookies.get_dict()
+                logger.info(f"Cookies fetched {self.cookies.keys()}")
 
-        params = {
-            'formatted': 'true',
-            'useRecordsResponse': 'true',
-            'lang': 'en-US',
-            'region': region,
-            'crumb': self.crumb,
-        }
+                if not all(cookie in self.cookies for cookie in required_cookies):
+                    logger.warning(f"Missing cookies: {required_cookies - set(self.cookies.keys())}")
+                    if attempt < self.retries - 1:
+                        time.sleep(attempt **2)
+                        continue
+                    raise ValueError("Failed to fetch required cookies")
 
-        json_data = {
+                logger.info(f"Fetching crumb from {self.CRUMB_URL}")
+                time.sleep(1) # Rate limiting
+                response = self.session.get(self.CRUMB_URL,timeout= 10)
+                response.raise_for_status()
+                self.crumb = response.text.strip()
+                if not self.crumb:
+                    raise ValueError("Empty crumb received")
+                logger.info(f"Crumb fetched successfully {self.crumb}")
+                return
+
+            except (requests.RequestException,ValueError) as e:
+                logger.info(f"Attempt {attempt+1} failed, response: {response.text if 'response' in locals() else 'No response'}")
+                if attempt == self.retries - 1:
+                    logger.error("All retries failed to initialize session")
+                    raise RuntimeError("Could not fetch cookies or crumb") from e
+                time.sleep(2 ** attempt)
+
+    def _initialize_session(self) -> None:
+        """Initialize Yahoo session and obtain crumb."""
+
+        for attempt in range(self.retries):
+            try:
+                logger.info("Initializing Yahoo session")
+
+                # Yahoo cookie bootstrap.
+                # 404 here is expected; we only care about the cookie.
+                self.session.get(
+                    "https://fc.yahoo.com",
+                    timeout=10
+                )
+
+                self.cookies = self.session.cookies.get_dict()
+                logger.info(f"Cookies fetched: {self.cookies.keys()}")
+
+                logger.info("Fetching Yahoo crumb")
+
+                response = self.session.get(
+                    self.CRUMB_URL,
+                    timeout=10
+                )
+                response.raise_for_status()
+
+                crumb = response.text.strip()
+
+                # Don't accidentally accept an HTML consent/error page as a crumb
+                if (
+                    not crumb
+                    or "<html" in crumb.lower()
+                    or "too many requests" in crumb.lower()
+                ):
+                    raise ValueError(
+                        f"Invalid crumb response: {crumb[:200]}"
+                    )
+
+                self.crumb = crumb
+
+                logger.info(f"Crumb fetched successfully: {self.crumb}")
+                return
+
+            except (requests.RequestException, ValueError) as e:
+                logger.warning(
+                    f"Attempt {attempt + 1}/{self.retries} failed: {e}"
+                )
+
+                if attempt == self.retries - 1:
+                    raise RuntimeError(
+                        "Could not initialize Yahoo session"
+                    ) from e
+
+                time.sleep(2 ** attempt)
+
+    def _build_market_cap_filter(self,min_cap: int,max_cap: Optional[int]) -> List[Dict]:
+        """Build market cap filter for API query"""
+        if max_cap is None:
+            return [{'operator':'gte','operands': ['intradaymarketcap',min_cap]}]
+        return [{'operator': 'btwn','operands':['intradaymarketcap',min_cap,max_cap]}]
+
+    def _build_request_payload(self,region:str,min_cap:int,max_cap: Optional[int]) -> Dict:
+        """Build the json payload for the API request"""
+        return {
             'size': 250,
             'offset': 0,
             'sortType': 'DESC',
             'sortField': 'intradaymarketcap',
             'includeFields': [
-                'ticker',
-                'companyshortname',
-                'intradayprice',
-                'intradaypricechange',
-                'percentchange',
-                'dayvolume',
-                'avgdailyvol3m',
-                'intradaymarketcap',
-                'peratio.lasttwelvemonths',
-                'day_open_price',
-                'fiftytwowklow',
-                'fiftytwowkhigh',
-                'region',
-                'sector',
-                'industry',
+                'ticker', 'companyshortname', 'intradayprice', 'intradaypricechange',
+                'percentchange', 'dayvolume', 'avgdailyvol3m', 'intradaymarketcap',
+                'peratio.lasttwelvemonths', 'day_open_price', 'fiftytwowklow',
+                'fiftytwowkhigh', 'region', 'sector', 'industry',
             ],
             'topOperator': 'AND',
             'query': {
                 'operator': 'and',
                 'operands': [
-                    {
-                        'operator': 'or',
-                        'operands': [
-                            {
-                                'operator': 'eq',
-                                'operands': ['region', region],
-                            },
-                        ],
-                    },
-                    {
-                        'operator': 'or',
-                        'operands': market_cap_filter,
-                    },
+                    {'operator': 'or', 'operands': [{'operator': 'eq', 'operands': ['region', region]}]},
+                    {'operator': 'or', 'operands': self._build_market_cap_filter(min_cap, max_cap)},
                 ],
             },
             'quoteType': 'EQUITY',
         }
 
-        try:
-            logging.info("Fetching tickers for region: %s, market_cap_min: %s, market_cap_max: %s",
-                        region, market_cap_min, market_cap_max)
-            time.sleep(1)  # Rate limiting
-            response = self.session.post(
-                self.base_url,
-                params=params,
-                cookies=self.cookies,
-                json=json_data
-            )
-            logging.info(response.json())
-            response.raise_for_status()
-            print(response.json())
-            logging.info("Tickers fetched successfully")
-            return response.json()
-        except requests.RequestException as e:
-            logging.error("Error fetching tickers: %s", e)
-            return None
+    def _fetch_tickers(self,region:str, min_cap:int,max_cap: Optional[int]) -> Optional[Dict]:
+        """Fetch tickers from Yahoo finance with retries"""
+        params = {
+            'formatted':'true',
+            'useRecordsResponse': 'true',
+            'lang': 'en-US',
+            'region': 'US',
+            'crumb': self.crumb
+        }
+        payload = self._build_request_payload(region,min_cap,max_cap)
 
-    def _processTickers(self, region):
-        """Process tickers into market cap categories."""
-        cap_ranges = [
-            (0, 150000000, 'micro_cap'),
-            (150000000, 1000000000, 'micro_cap2'),
-            (1000000000, 2000000000, 'small_cap'),
-            (2000000000, 10000000000, 'mid_cap'),
-            (10000000000, 100000000000, 'large_cap'),
-            (100000000000, None, 'mega_cap')
-        ]
+        for attempt in range(self.retries):
+            try:
+                logger.info(f"Fetching tickers for region {region}, min_cap {min_cap}, max_cap {max_cap}")
+                time.sleep(1)
+                response = self.session.post(
+                    self.BASE_URL,
+                    params=params,
+                    cookies=self.cookies,
+                    json = payload
+                )
+                response.raise_for_status()
+                data = response.json()
+                logger.info("Tickers fetched successfully")
+                return data
+            except requests.RequestException as e:
+                logger.error(f"All entries failed for region {region}")
 
-        cap_results = {}
-        for min_cap, max_cap, cap_label in cap_ranges:
-            cap_results[cap_label] = []
-            tickers_json = self._getTickers(region, min_cap, max_cap)
-            logging.warning(tickers_json)
-            if tickers_json and 'finance' in tickers_json and 'result' in tickers_json['finance']:
-                for data in tickers_json['finance']['result'][0].get('records', []):
-                    cap_results[cap_label].append(data['ticker'])
+                if attempt == self.retries -1:
+                    try:
+                        self._initialize_session()
+                        continue
+                    except RuntimeError:
+                        return None
+                time.sleep(2 ** attempt)
+        return None
+
+    def get_tickers_by_market_cap(self,region: str) -> Dict[str,List[str]]:
+        """Fetch and categorize by market cap"""
+        cap_results = {range_.label: [] for range_ in self.market_cap_ranges}
+
+        for range_ in self.market_cap_ranges:
+            logger.info(f"Processing for market cap range: {range_.label}")
+            tickers_json = self._fetch_tickers(region,range_.min_cap,range_.max_cap)
+
+            if tickers_json and 'finance' and 'result' in tickers_json['finance']:
+                records = tickers_json['finance']['result'][0].get('records',[])
+                cap_results[range_.label].extend(data['ticker'] for data in records)
             else:
-                logging.warning("No valid data for %s", cap_label)
-            time.sleep(2)  # Rate limiting
+                logger.warning(f"No valid data for {range_.label}")
 
+            time.sleep(2)
         return cap_results
 
-    def get_tickers_by_market_cap(self, region):
-        """Fetch and categorize tickers by market cap."""
-        return self._processTickers(region)
-
-    def close(self):
-        """Close the session."""
-        logging.info("Closing session")
+    def close(self) -> None:
+        """Close the session"""
+        logger.info(" Misses: 4, Closing session")
         self.session.close()
+
+    def __enter__(self):
+        """Enable context manager support."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Ensure session is closed when using context manager."""
+        self.close()
