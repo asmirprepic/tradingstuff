@@ -4,6 +4,7 @@ import time
 import logging
 from typing import Optional, Dict, List
 from dataclasses import dataclass
+import json
 
 
 logging.basicConfig(level=logging.INFO, format = '%(asctime)s - %(levelname)s - %(message)s')
@@ -250,6 +251,13 @@ class GetTickers:
         """Close the session"""
         logger.info(" Misses: 4, Closing session")
         self.session.close()
+
+    def save_tickers(self, tickers: Dict[str, List[str]], filepath: str) -> None:
+        """Save ticker dictionary to JSON."""
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(tickers, f, indent=2)
+
+        logger.info(f"Saved tickers to {filepath}")
 
     def __enter__(self):
         """Enable context manager support."""
