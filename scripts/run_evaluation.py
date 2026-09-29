@@ -11,7 +11,7 @@ if str(repo_root) not in sys.path:
 import pandas as pd
 
 from data_handling.get_stock_data import GetStockDataTest
-from data_handling.get_stock_tickers_upd import GetTickers
+from data_handling.get_stock_tickers import GetTickers
 from agents.technical.momentum_agent import MomentumAgent
 from agents.utils.evaluate import evaluations_from_agent
 
@@ -131,7 +131,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Run recommendations pipeline')
     parser.add_argument('--tickers', type=str, default='AAA,BBB', help='Comma-separated tickers')
     parser.add_argument('--tickers-file', type=str, default=None, help='Path to a file with tickers (csv or txt).')
-    parser.add_argument('--fetch-tickers', type=str, default=None, help='If provided, fetch tickers from Yahoo by region (e.g. US) using data_handling.get_stock_tickers_upd.GetTickers and use them')
+    parser.add_argument('--fetch-tickers', type=str, default=None, help='If provided, fetch tickers from Yahoo by region (e.g. US) using data_handling.get_stock_tickers.GetTickers and use them')
     parser.add_argument('--fetch-out', type=str, default=None, help='If --fetch-tickers is used, save fetched tickers to this file path')
     parser.add_argument('--start', type=str, default=None, help='Start date YYYY-MM-DD')
     parser.add_argument('--end', type=str, default=None, help='End date YYYY-MM-DD')

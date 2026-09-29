@@ -230,7 +230,7 @@ class GetTickers:
                 time.sleep(2 ** attempt)
         return None
 
-    def get_tickers_by_market_cap(self,region: str) -> Dict[str,List[str]]:
+    def get_tickers_by_market_cap(self,region: str,save_path: Optional[str] = None) -> Dict[str,List[str]]:
         """Fetch and categorize by market cap"""
         cap_results = {range_.label: [] for range_ in self.market_cap_ranges}
 
@@ -245,6 +245,12 @@ class GetTickers:
                 logger.warning(f"No valid data for {range_.label}")
 
             time.sleep(2)
+        if save_path:
+            self.save_tickers(
+                cap_results,
+                save_path
+            )
+
         return cap_results
 
     def close(self) -> None:

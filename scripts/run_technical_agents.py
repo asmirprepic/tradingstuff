@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from data_handling.get_stock_data import GetStockDataTest
-from data_handling.get_stock_tickers_upd import GetTickers
+from data_handling.get_stock_tickers import GetTickers
 from agents.technical.bollinger_bands_agent import BollingerBandsAgent
 from agents.technical.adx_dmi_agent import ADXDMIAgent
 from agents.technical.change_point_agent import ChangePointAgent

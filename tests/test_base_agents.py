@@ -22,6 +22,7 @@ from agents.ml_based.classical.logistic_reg_agent import LRAgent
 from agents.ml_based.deep_learning.lstm_agent import LSTMAgent
 from agents.ml_based.classical.naive_bayes_agent import NaiveBayesAgent
 from agents.ml_based.classical.online_sgd_agent import OnlineSGDAgent
+from agents.ml_based.classical.perceptron_agent import PerceptronAgent
 from agents.ml_based.classical.quantile_regression_agent import QuantileRegressionAgent
 from agents.ml_based.classical.qda_agent import QDAAgent
 from agents.ml_based.classical.spline_logistic_agent import SplineLogisticAgent
@@ -836,6 +837,30 @@ class BaseAgentsTests(unittest.TestCase):
             OnlineSGDAgent(data, alpha=0)
         with self.assertRaises(ValueError):
             OnlineSGDAgent(data, proba_threshold=1.0)
+
+    def test_perceptron_agent_uses_purged_split_and_signed_score(self):
+        data = make_market_data(periods=80)
+        agent = PerceptronAgent(data)
+        agent.train_model("AAA")
+        x_train, x_test, _, _ = agent.train_data["AAA"]
+        labeled, _ = agent.feature_engineering("AAA")
+
+        self.assertEqual(x_train.index[-1], labeled.index[int(len(labeled) * 0.8) - 2])
+        self.assertEqual(x_test.index[0], labeled.index[int(len(labeled) * 0.8)])
+        signals = agent.predict_signals("AAA", mode="backtest")
+        self.assertIn("DecisionScore", signals.columns)
+        self.assertTrue(signals["Position"].isin([-1, 1]).all())
+        self.assertTrue(signals.index.equals(x_test.index))
+
+    def test_perceptron_agent_validates_parameters(self):
+        data = make_market_data(periods=30)
+
+        with self.assertRaises(ValueError):
+            PerceptronAgent(data, timing="intraday")
+        with self.assertRaises(ValueError):
+            PerceptronAgent(data, alpha=0)
+        with self.assertRaises(ValueError):
+            PerceptronAgent(data, max_iter=0)
 
     def test_quantile_regression_agent_uses_purged_time_split_and_live_row(self):
         data = make_market_data(periods=100)
