@@ -163,9 +163,14 @@ def render_agent_summary_table(df):
               <td>{html.escape(str(row.get("Agent", "")))}</td>
               <td>{html.escape(str(row.get("Algorithm", "")))}</td>
               <td class="num">{format_integer(row.get("Stocks"))}</td>
+              <td>{html.escape(str(row.get("ReturnAggregation", "per_stock_average")))}</td>
               <td class="num">{format_number(row.get("AvgStrategyReturnPct"))}</td>
               <td class="num">{format_number(row.get("MedianStrategyReturnPct"))}</td>
               <td class="num">{format_number(row.get("AvgBuyHoldReturnPct"))}</td>
+              <td class="num">{format_number(row.get("ExcessReturnPct"))}</td>
+              <td class="num">{format_number(row.get("AnnualizedSharpe"))}</td>
+              <td class="num">{format_number(row.get("MaxDrawdownPct"))}</td>
+              <td class="num">{format_number(row.get("TotalTurnover"))}</td>
               <td class="num">{format_integer(row.get("ProfitableStocks"))}</td>
               <td class="num">{format_number(row.get("AvgEntries"))}</td>
               <td class="num">{format_number(row.get("AvgScore"))}</td>
@@ -181,9 +186,14 @@ def render_agent_summary_table(df):
           <th>Agent</th>
           <th>Algorithm</th>
           <th class="num">Stocks</th>
+          <th>Aggregation</th>
           <th class="num">Avg Return</th>
           <th class="num">Median Return</th>
           <th class="num">Buy/Hold</th>
+          <th class="num">Excess</th>
+          <th class="num">Sharpe</th>
+          <th class="num">Max DD</th>
+          <th class="num">Turnover</th>
           <th class="num">Profitable</th>
           <th class="num">Avg Entries</th>
           <th class="num">Avg Score</th>

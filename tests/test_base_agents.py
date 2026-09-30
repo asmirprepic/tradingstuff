@@ -46,7 +46,7 @@ from agents.technical.rsi_agent import RSIAgent
 from agents.technical.supertrend_agent import SupertrendAgent
 from agents.technical.volume_price_divergence_agent import VolumePriceDivergenceAgent
 from agents.technical.volume_weighted_average_price_agent import VWAPAgent
-from scripts.run_technical_agents import build_family_summary_table, build_stock_shortlist_table
+from scripts.run_technical_agents import build_agent_summary, build_family_summary_table, build_stock_shortlist_table
 
 
 def make_market_data(stock="AAA", periods=60):
@@ -1424,6 +1424,25 @@ class BaseAgentsTests(unittest.TestCase):
 
         self.assertAlmostEqual(agent.portfolio_log_returns.iloc[2], np.log1p(0.5), places=9)
         self.assertAlmostEqual(agent.cumulative_returns.iloc[-1], np.log1p(0.5), places=9)
+
+    def test_performance_summary_uses_portfolio_not_diluted_stock_average(self):
+        index = pd.date_range("2024-01-01", periods=6, freq="B")
+        columns = pd.MultiIndex.from_product([["AAA", "BBB"], ["Close"]])
+        data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        data[("AAA", "Close")] = [100, 110, 121, 133.1, 146.41, 161.051]
+        data[("BBB", "Close")] = [100, 100, 100, 100, 100, 100]
+        agent = PerformanceBasedAgent(data, period_length=1, top_n=1, holding_period=2, auto_generate=False)
+        agent.run_all()
+
+        summary = build_agent_summary("performance", agent, pd.DataFrame())
+
+        expected = float(agent.portfolio_log_returns.loc[agent.holdings_matrix.shift(1).sum(axis=1) > 0].sum() * 100)
+        diluted = pd.DataFrame(agent.returns_data).T["PerformanceBasedAgent_return"].mean()
+        self.assertEqual(summary["ReturnAggregation"], "portfolio")
+        self.assertAlmostEqual(summary["AvgStrategyReturnPct"], expected)
+        self.assertNotAlmostEqual(summary["AvgStrategyReturnPct"], diluted)
+        self.assertIn("ExcessReturnPct", summary)
+        self.assertGreater(summary["TotalTurnover"], 0)
 
     def test_nr7_agent_run_all_populates_return_contract(self):
         data = make_market_data(periods=12)

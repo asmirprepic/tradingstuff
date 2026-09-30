@@ -236,19 +236,29 @@ def build_agent(agent_name, price_df):
 def build_agent_summary(agent_name, agent, recs):
     strategy_key = f"{agent.algorithm_name}_return"
     returns_df = pd.DataFrame(agent.returns_data).T if agent.returns_data else pd.DataFrame()
+    portfolio_metrics = _portfolio_summary_metrics(agent)
 
-    if returns_df.empty:
+    if portfolio_metrics is not None:
+        avg_strategy = portfolio_metrics["strategy_return_pct"]
+        median_strategy = float("nan")
+        avg_buyhold = portfolio_metrics["benchmark_return_pct"]
+        profitable = int(avg_strategy > 0)
+        avg_entries = portfolio_metrics["rebalance_count"]
+        return_aggregation = "portfolio"
+    elif returns_df.empty:
         avg_strategy = float("nan")
         median_strategy = float("nan")
         avg_buyhold = float("nan")
         profitable = 0
         avg_entries = float("nan")
+        return_aggregation = "per_stock_average"
     else:
         avg_strategy = float(returns_df[strategy_key].mean())
         median_strategy = float(returns_df[strategy_key].median())
         avg_buyhold = float(returns_df["buy_and_hold_return"].mean())
         profitable = int((returns_df[strategy_key] > 0).sum())
         avg_entries = float(returns_df["total_entries"].mean())
+        return_aggregation = "per_stock_average"
 
     recs = recs.copy()
     if recs.empty:
@@ -270,9 +280,14 @@ def build_agent_summary(agent_name, agent, recs):
         "Agent": agent_name,
         "Algorithm": agent.algorithm_name,
         "Stocks": len(agent.signal_data),
+        "ReturnAggregation": return_aggregation,
         "AvgStrategyReturnPct": avg_strategy,
         "MedianStrategyReturnPct": median_strategy,
         "AvgBuyHoldReturnPct": avg_buyhold,
+        "ExcessReturnPct": avg_strategy - avg_buyhold,
+        "AnnualizedSharpe": portfolio_metrics["annualized_sharpe"] if portfolio_metrics else float("nan"),
+        "MaxDrawdownPct": portfolio_metrics["max_drawdown_pct"] if portfolio_metrics else float("nan"),
+        "TotalTurnover": portfolio_metrics["total_turnover"] if portfolio_metrics else float("nan"),
         "ProfitableStocks": profitable,
         "AvgEntries": avg_entries,
         "LatestBuys": latest_buys,
@@ -281,6 +296,51 @@ def build_agent_summary(agent_name, agent, recs):
         "AvgScore": avg_score,
         "TopPick": top_pick,
         "TopPickScore": top_pick_score,
+    }
+
+
+def _portfolio_summary_metrics(agent):
+    """Return comparable portfolio statistics for cross-sectional agents."""
+    portfolio_returns = getattr(agent, "portfolio_log_returns", None)
+    holdings = getattr(agent, "holdings_matrix", None)
+    if not isinstance(portfolio_returns, pd.Series) or not isinstance(holdings, pd.DataFrame):
+        return None
+    if portfolio_returns.empty or holdings.empty:
+        return None
+
+    holdings = holdings.reindex(portfolio_returns.index).fillna(0).astype(float)
+    effective_holdings = holdings.shift(1).fillna(0)
+    active = effective_holdings.sum(axis=1) > 0
+    strategy = portfolio_returns.reindex(holdings.index).loc[active].dropna()
+    if strategy.empty:
+        return None
+
+    prices = agent.data.xs(agent.price_type, level=1, axis=1).reindex(holdings.index)
+    universe_simple_returns = prices.pct_change(fill_method=None).mean(axis=1)
+    benchmark = np.log1p(universe_simple_returns.clip(lower=-0.999999)).loc[strategy.index].dropna()
+    common_index = strategy.index.intersection(benchmark.index)
+    strategy = strategy.loc[common_index]
+    benchmark = benchmark.loc[common_index]
+
+    volatility = float(strategy.std(ddof=1))
+    sharpe = float(np.sqrt(252) * strategy.mean() / volatility) if volatility > 0 else float("nan")
+    wealth = np.exp(strategy.cumsum())
+    running_peak = wealth.cummax().clip(lower=1.0)
+    drawdown = wealth.div(running_peak).sub(1.0)
+
+    weights = holdings.div(holdings.sum(axis=1).replace(0, np.nan), axis=0).fillna(0)
+    weights["__cash__"] = 1.0 - weights.sum(axis=1)
+    turnover_by_day = weights.diff().abs().sum(axis=1).div(2.0)
+    selection_matrix = getattr(agent, "selection_matrix", pd.DataFrame())
+    rebalance_count = int((selection_matrix.sum(axis=1) > 0).sum()) if not selection_matrix.empty else 0
+
+    return {
+        "strategy_return_pct": float(strategy.sum() * 100),
+        "benchmark_return_pct": float(benchmark.sum() * 100),
+        "annualized_sharpe": sharpe,
+        "max_drawdown_pct": float(drawdown.min() * 100),
+        "total_turnover": float(turnover_by_day.sum()),
+        "rebalance_count": rebalance_count,
     }
 
 
