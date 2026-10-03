@@ -41,6 +41,7 @@ from agents.technical.momentum_agent import MomentumAgent
 from agents.technical.nr7_agent import NR7BreakoutAgent
 from agents.technical.on_balance_volume_agent import OBVAgent
 from agents.technical.performance_agent import PerformanceBasedAgent
+from agents.technical.relative_strength_agent import RelativeStrengthAgent
 from agents.technical.price_volume_trend_agent import PVTAgent
 from agents.technical.rsi_agent import RSIAgent
 from agents.technical.supertrend_agent import SupertrendAgent
@@ -1443,6 +1444,54 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertNotAlmostEqual(summary["AvgStrategyReturnPct"], diluted)
         self.assertIn("ExcessReturnPct", summary)
         self.assertGreater(summary["TotalTurnover"], 0)
+
+    def test_relative_strength_agent_selects_positive_trending_leaders(self):
+        index = pd.date_range("2024-01-01", periods=12, freq="B")
+        columns = pd.MultiIndex.from_product([["AAA", "BBB", "CCC"], ["Close"]])
+        data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        data[("AAA", "Close")] = [100, 102, 105, 107, 111, 114, 118, 121, 125, 129, 134, 138]
+        data[("BBB", "Close")] = [100, 101, 100, 102, 103, 102, 104, 105, 104, 106, 107, 108]
+        data[("CCC", "Close")] = [100, 98, 97, 95, 94, 92, 91, 89, 88, 86, 85, 83]
+        agent = RelativeStrengthAgent(
+            data, lookback_period=3, trend_period=4, volatility_period=3,
+            rebalance_period=2, top_n=2, auto_generate=False,
+        )
+
+        agent.run_all()
+
+        rebalance_dates = agent.selection_matrix.sum(axis=1).loc[lambda values: values > 0].index
+        self.assertGreater(len(rebalance_dates), 0)
+        first_rebalance = rebalance_dates[0]
+        self.assertEqual(int(agent.holdings_matrix.loc[first_rebalance, "AAA"]), 1)
+        self.assertAlmostEqual(float(agent.weights_matrix.loc[first_rebalance].sum()), 1.0)
+        self.assertIn("RelativeStrength", agent.signal_data["AAA"].columns)
+        self.assertIn("Weight", agent.signal_data["AAA"].columns)
+        self.assertEqual(float(agent.portfolio_log_returns.loc[first_rebalance]), 0.0)
+        summary = build_agent_summary("relative_strength", agent, pd.DataFrame())
+        self.assertEqual(summary["ReturnAggregation"], "portfolio")
+
+    def test_relative_strength_agent_stays_in_cash_without_absolute_uptrend(self):
+        index = pd.date_range("2024-01-01", periods=10, freq="B")
+        columns = pd.MultiIndex.from_product([["AAA", "BBB"], ["Close"]])
+        data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        declining = [100, 99, 97, 96, 94, 93, 91, 90, 88, 87]
+        data[("AAA", "Close")] = declining
+        data[("BBB", "Close")] = declining
+        agent = RelativeStrengthAgent(
+            data, lookback_period=2, trend_period=3, volatility_period=2,
+            rebalance_period=2, top_n=1,
+        )
+
+        self.assertEqual(float(agent.weights_matrix.to_numpy().sum()), 0.0)
+        self.assertEqual(float(agent.portfolio_log_returns.sum()), 0.0)
+
+    def test_relative_strength_agent_validates_configuration(self):
+        data = make_market_data(periods=20)
+
+        with self.assertRaises(ValueError):
+            RelativeStrengthAgent(data, lookback_period=0, auto_generate=False)
+        with self.assertRaises(ValueError):
+            RelativeStrengthAgent(data, top_n=2, auto_generate=False)
 
     def test_nr7_agent_run_all_populates_return_contract(self):
         data = make_market_data(periods=12)

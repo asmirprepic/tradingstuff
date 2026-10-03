@@ -27,6 +27,7 @@ from agents.technical.moving_average_crossover_agent import MovingAverageCrossov
 from agents.technical.nr7_agent import NR7BreakoutAgent
 from agents.technical.on_balance_volume_agent import OBVAgent
 from agents.technical.performance_agent import PerformanceBasedAgent
+from agents.technical.relative_strength_agent import RelativeStrengthAgent
 from agents.technical.price_volume_trend_agent import PVTAgent
 from agents.technical.rsi_agent import RSIAgent
 from agents.technical.supertrend_agent import SupertrendAgent
@@ -51,6 +52,7 @@ AGENT_ORDER = [
     "pvt",
     "volume_price_divergence",
     "performance",
+    "relative_strength",
     "high_low",
     "nr7",
 ]
@@ -64,6 +66,7 @@ AGENT_FAMILIES = {
     "change_point": "regime",
     "supertrend": "trend",
     "performance": "trend",
+    "relative_strength": "trend",
     "bollinger": "mean_reversion",
     "mean_reversion": "mean_reversion",
     "rsi": "mean_reversion",
@@ -225,6 +228,15 @@ def build_agent(agent_name, price_df):
             top_n=max(1, min(5, stock_count)),
             holding_period=20,
         )
+    if agent_name == "relative_strength":
+        return RelativeStrengthAgent(
+            price_df,
+            lookback_period=126,
+            trend_period=200,
+            volatility_period=20,
+            rebalance_period=20,
+            top_n=max(1, min(20, stock_count)),
+        )
     if agent_name == "high_low":
         return HighLowAgent(price_df)
     if agent_name == "nr7":
@@ -309,7 +321,11 @@ def _portfolio_summary_metrics(agent):
         return None
 
     holdings = holdings.reindex(portfolio_returns.index).fillna(0).astype(float)
-    effective_holdings = holdings.shift(1).fillna(0)
+    portfolio_weights = getattr(agent, "weights_matrix", holdings)
+    if not isinstance(portfolio_weights, pd.DataFrame) or portfolio_weights.empty:
+        portfolio_weights = holdings
+    portfolio_weights = portfolio_weights.reindex(portfolio_returns.index).fillna(0).astype(float)
+    effective_holdings = portfolio_weights.shift(1).fillna(0)
     active = effective_holdings.sum(axis=1) > 0
     strategy = portfolio_returns.reindex(holdings.index).loc[active].dropna()
     if strategy.empty:
@@ -328,7 +344,10 @@ def _portfolio_summary_metrics(agent):
     running_peak = wealth.cummax().clip(lower=1.0)
     drawdown = wealth.div(running_peak).sub(1.0)
 
-    weights = holdings.div(holdings.sum(axis=1).replace(0, np.nan), axis=0).fillna(0)
+    weights = portfolio_weights.copy()
+    row_sums = weights.sum(axis=1)
+    overweight = row_sums > 1.0
+    weights.loc[overweight] = weights.loc[overweight].div(row_sums.loc[overweight], axis=0)
     weights["__cash__"] = 1.0 - weights.sum(axis=1)
     turnover_by_day = weights.diff().abs().sum(axis=1).div(2.0)
     selection_matrix = getattr(agent, "selection_matrix", pd.DataFrame())
