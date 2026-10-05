@@ -51,6 +51,7 @@ class TechnicalDashboardTests(unittest.TestCase):
         self.assertIn("Aggregation", html)
         self.assertIn("Max DD", html)
         self.assertIn("Turnover", html)
+        self.assertIn("Equal-Wt Buy/Hold", html)
         self.assertIn("Family Summary", html)
         self.assertIn("Shortlist", html)
         self.assertIn("MSFT", html)

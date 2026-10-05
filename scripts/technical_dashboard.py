@@ -189,7 +189,7 @@ def render_agent_summary_table(df):
           <th>Aggregation</th>
           <th class="num">Avg Return</th>
           <th class="num">Median Return</th>
-          <th class="num">Buy/Hold</th>
+          <th class="num">Equal-Wt Buy/Hold</th>
           <th class="num">Excess</th>
           <th class="num">Sharpe</th>
           <th class="num">Max DD</th>

@@ -293,6 +293,7 @@ def build_agent_summary(agent_name, agent, recs):
         "Algorithm": agent.algorithm_name,
         "Stocks": len(agent.signal_data),
         "ReturnAggregation": return_aggregation,
+        "BenchmarkType": "equal_weight_buy_and_hold" if portfolio_metrics else "per_stock_buy_and_hold_average",
         "AvgStrategyReturnPct": avg_strategy,
         "MedianStrategyReturnPct": median_strategy,
         "AvgBuyHoldReturnPct": avg_buyhold,
@@ -312,7 +313,7 @@ def build_agent_summary(agent_name, agent, recs):
 
 
 def _portfolio_summary_metrics(agent):
-    """Return comparable portfolio statistics for cross-sectional agents."""
+    """Return portfolio statistics against an equal-weight buy-and-hold universe."""
     portfolio_returns = getattr(agent, "portfolio_log_returns", None)
     holdings = getattr(agent, "holdings_matrix", None)
     if not isinstance(portfolio_returns, pd.Series) or not isinstance(holdings, pd.DataFrame):
@@ -327,16 +328,28 @@ def _portfolio_summary_metrics(agent):
     portfolio_weights = portfolio_weights.reindex(portfolio_returns.index).fillna(0).astype(float)
     effective_holdings = portfolio_weights.shift(1).fillna(0)
     active = effective_holdings.sum(axis=1) > 0
-    strategy = portfolio_returns.reindex(holdings.index).loc[active].dropna()
-    if strategy.empty:
+    active_positions = np.flatnonzero(active.to_numpy())
+    if not len(active_positions):
         return None
+    inception_position = int(active_positions[0])
+    if inception_position == 0:
+        return None
+    strategy = portfolio_returns.reindex(holdings.index).iloc[inception_position:].fillna(0.0)
 
-    prices = agent.data.xs(agent.price_type, level=1, axis=1).reindex(holdings.index)
-    universe_simple_returns = prices.pct_change(fill_method=None).mean(axis=1)
-    benchmark = np.log1p(universe_simple_returns.clip(lower=-0.999999)).loc[strategy.index].dropna()
-    common_index = strategy.index.intersection(benchmark.index)
-    strategy = strategy.loc[common_index]
-    benchmark = benchmark.loc[common_index]
+    prices = agent.data.xs(agent.price_type, level=1, axis=1).reindex(holdings.index).astype(float)
+    benchmark_prices = prices.iloc[inception_position - 1:]
+    valid_assets = (
+        benchmark_prices.iloc[0].gt(0)
+        & benchmark_prices.notna().all(axis=0)
+    )
+    benchmark_prices = benchmark_prices.loc[:, valid_assets]
+    if benchmark_prices.empty:
+        return None
+    # Equal capital is invested once; subsequent weights drift with asset performance.
+    normalized_assets = benchmark_prices.div(benchmark_prices.iloc[0], axis=1)
+    benchmark_wealth = normalized_assets.mean(axis=1)
+    benchmark = np.log(benchmark_wealth.div(benchmark_wealth.shift(1))).iloc[1:]
+    strategy = strategy.reindex(benchmark.index).fillna(0.0)
 
     volatility = float(strategy.std(ddof=1))
     sharpe = float(np.sqrt(252) * strategy.mean() / volatility) if volatility > 0 else float("nan")

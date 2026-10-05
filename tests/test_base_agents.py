@@ -1445,6 +1445,25 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("ExcessReturnPct", summary)
         self.assertGreater(summary["TotalTurnover"], 0)
 
+    def test_performance_summary_benchmark_is_true_equal_weight_buy_and_hold(self):
+        index = pd.date_range("2024-01-01", periods=5, freq="B")
+        columns = pd.MultiIndex.from_product([["AAA", "BBB"], ["Close"]])
+        data = pd.DataFrame(index=index, columns=columns, dtype=float)
+        data[("AAA", "Close")] = [100, 110, 121, 133.1, 146.41]
+        data[("BBB", "Close")] = [100, 100, 100, 100, 100]
+        agent = PerformanceBasedAgent(
+            data, period_length=1, top_n=1, holding_period=2, auto_generate=False
+        )
+        agent.run_all()
+
+        summary = build_agent_summary("performance", agent, pd.DataFrame())
+        first_active = np.flatnonzero(agent.holdings_matrix.shift(1).sum(axis=1).to_numpy() > 0)[0]
+        base_prices = data.xs("Close", level=1, axis=1).iloc[first_active - 1]
+        end_prices = data.xs("Close", level=1, axis=1).iloc[-1]
+        expected_wealth = float((end_prices / base_prices).mean())
+
+        self.assertAlmostEqual(summary["AvgBuyHoldReturnPct"], np.log(expected_wealth) * 100)
+
     def test_relative_strength_agent_selects_positive_trending_leaders(self):
         index = pd.date_range("2024-01-01", periods=12, freq="B")
         columns = pd.MultiIndex.from_product([["AAA", "BBB", "CCC"], ["Close"]])
