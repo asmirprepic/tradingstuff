@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -36,8 +38,14 @@ class DeepQLearningAgent(TradingAgent):
         split_ratio=0.8,
         hidden_units=24,
         verbose=0,
+        random_state=42,
+        progress_interval=10,
     ):
         super().__init__(data)
+        self._validate_parameters(
+            alpha, gamma, epsilon, epsilon_decay, epsilon_min,
+            episodes, split_ratio, hidden_units, verbose, random_state, progress_interval,
+        )
         self.algorithm_name = "DeepQLearning"
         self.score_column = "SignalStrength"
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
@@ -51,9 +59,46 @@ class DeepQLearningAgent(TradingAgent):
         self.split_ratio = split_ratio
         self.hidden_units = hidden_units
         self.verbose = verbose
+        self.random_state = int(random_state)
+        self.progress_interval = int(progress_interval)
 
         self.models = {}
         self.train_data = {}
+
+    @staticmethod
+    def _validate_parameters(alpha, gamma, epsilon, epsilon_decay, epsilon_min,
+                             episodes, split_ratio, hidden_units, verbose, random_state,
+                             progress_interval):
+        if alpha <= 0:
+            raise ValueError("alpha must be positive.")
+        if not 0 <= gamma < 1:
+            raise ValueError("gamma must be between 0 (inclusive) and 1 (exclusive).")
+        if not 0 <= epsilon <= 1:
+            raise ValueError("epsilon must be between 0 and 1.")
+        if not 0 < epsilon_decay <= 1:
+            raise ValueError("epsilon_decay must be between 0 (exclusive) and 1.")
+        if not 0 <= epsilon_min <= epsilon:
+            raise ValueError("epsilon_min must be between 0 and epsilon.")
+        integer_values = {
+            "episodes": episodes,
+            "hidden_units": hidden_units,
+            "progress_interval": progress_interval,
+        }
+        for name, value in integer_values.items():
+            if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or value < 1:
+                raise ValueError(f"{name} must be a positive integer.")
+        if not 0 < split_ratio < 1:
+            raise ValueError("split_ratio must be between 0 and 1.")
+        if isinstance(verbose, bool) or not isinstance(verbose, (int, np.integer)) or verbose < 0:
+            raise ValueError("verbose must be a non-negative integer.")
+        if (isinstance(random_state, bool)
+                or not isinstance(random_state, (int, np.integer))
+                or random_state < 0):
+            raise ValueError("random_state must be a non-negative integer.")
+
+    def _training_rng(self):
+        tf.keras.utils.set_random_seed(self.random_state)
+        return np.random.default_rng(self.random_state)
 
     def _require_tensorflow(self):
         if Sequential is None:
@@ -80,7 +125,22 @@ class DeepQLearningAgent(TradingAgent):
         kwargs.setdefault("shuffle", False)
         if split_ratio is not None and "test_size" not in kwargs:
             kwargs["test_size"] = 1 - split_ratio
-        return train_test_split(X, rewards, index, **kwargs)
+        X_train, X_test, rewards_train, rewards_test, index_train, index_test = train_test_split(
+            X, rewards, index, **kwargs
+        )
+        if len(X_train) < 2:
+            raise ValueError("Training split is too small to purge the boundary label.")
+
+        # The final training reward uses the following close, which belongs to
+        # the test period. Remove that transition without changing the test set.
+        return (
+            X_train.iloc[:-1],
+            X_test,
+            rewards_train.iloc[:-1],
+            rewards_test,
+            index_train[:-1],
+            index_test,
+        )
 
     def build_model(self, input_dim):
         model = Sequential(
@@ -101,6 +161,7 @@ class DeepQLearningAgent(TradingAgent):
 
     def train_model(self, stock):
         self._require_tensorflow()
+        rng = self._training_rng()
         X, rewards = self.feature_engineering(stock)
 
         if len(X) < 3:
@@ -124,31 +185,56 @@ class DeepQLearningAgent(TradingAgent):
         model = self.build_model(input_dim=X_train_norm.shape[1])
         epsilon = float(self.epsilon)
         reward_values = rewards_train.to_numpy(dtype=float)
+        started = time.perf_counter()
+        total_steps = 0
+        if self.verbose:
+            print(
+                f"[DQN] {stock}: {len(X_train_norm)} training rows, "
+                f"{self.episodes} episodes",
+                flush=True,
+            )
 
-        for _ in range(self.episodes):
+        for episode in range(1, self.episodes + 1):
             state = 0
+            episode_reward = 0.0
+            episode_steps = 0
             while state < len(X_train_norm) - 1:
-                if np.random.rand() <= epsilon:
-                    action = np.random.randint(2)
+                if rng.random() <= epsilon:
+                    action = int(rng.integers(2))
                 else:
                     action = int(np.argmax(self._predict_q_values(model, X_train_norm[state:state + 1])[0]))
 
                 next_state = state + 1
                 reward = reward_values[state] if action == 1 else 0.0
-                next_q = self._predict_q_values(model, X_train_norm[next_state:next_state + 1])[0]
+                adjacent_q = self._predict_q_values(model, X_train_norm[state:next_state + 1])
+                next_q = adjacent_q[1]
                 target = reward + self.gamma * float(np.max(next_q))
-                target_f = self._predict_q_values(model, X_train_norm[state:state + 1])
+                target_f = adjacent_q[0:1].copy()
                 target_f[0, action] = target
-                model.fit(
-                    X_train_norm[state:state + 1],
-                    target_f,
-                    epochs=1,
-                    verbose=0,
-                )
+                model.train_on_batch(X_train_norm[state:state + 1], target_f)
+                episode_reward += reward
+                episode_steps += 1
+                total_steps += 1
                 state = next_state
 
             if epsilon > self.epsilon_min:
                 epsilon = max(self.epsilon_min, epsilon * self.epsilon_decay)
+            should_report = (
+                self.verbose
+                and (episode == 1 or episode == self.episodes or episode % self.progress_interval == 0)
+            )
+            if should_report:
+                elapsed = time.perf_counter() - started
+                average_reward = episode_reward / episode_steps if episode_steps else 0.0
+                rate = total_steps / elapsed if elapsed > 0 else 0.0
+                print(
+                    f"[DQN] {stock}: episode {episode}/{self.episodes} | "
+                    f"epsilon={epsilon:.4f} | avg_reward={average_reward:.6f} | "
+                    f"elapsed={elapsed:.1f}s | {rate:.1f} steps/s",
+                    flush=True,
+                )
+
+        training_seconds = time.perf_counter() - started
 
         self.models[stock] = model
         self.train_data[stock] = {
@@ -168,6 +254,7 @@ class DeepQLearningAgent(TradingAgent):
             "SplitRatio": self.split_ratio,
             "Episodes": self.episodes,
             "EpsilonFinal": epsilon,
+            "TrainingSeconds": training_seconds,
         }
 
     def predict_signals(self, stock, mode="backtest", threshold=0.0):

@@ -1,6 +1,7 @@
 import unittest
 import uuid
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -17,6 +18,7 @@ from agents.ml_based.clustering.clustering_agent import ClusteringFilteredKNNAge
 from agents.ml_based.deep_learning.lstm_attention_agent import LSTMAttentionAgent
 from agents.ml_based.deep_learning.nn_classification_agent import DenseNNAgent
 from agents.ml_based.regime.hmm_based_agent import HMMRegimeAgent
+from agents.ml_based.reinforcement_learning.deep_q_learning_agent import DeepQLearningAgent
 from agents.ml_based.classical.gaussian_process_agent import GaussianProcessAgent
 from agents.ml_based.classical.logistic_reg_agent import LRAgent
 from agents.ml_based.deep_learning.lstm_agent import LSTMAgent
@@ -862,6 +864,77 @@ class BaseAgentsTests(unittest.TestCase):
             PerceptronAgent(data, alpha=0)
         with self.assertRaises(ValueError):
             PerceptronAgent(data, max_iter=0)
+
+    def test_deep_q_learning_split_purges_boundary_reward(self):
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(data, split_ratio=0.8)
+        features, rewards = agent.feature_engineering("AAA")
+
+        x_train, x_test, rewards_train, rewards_test, index_train, index_test = (
+            agent.create_train_split_group(
+                features, rewards, features.index, split_ratio=agent.split_ratio
+            )
+        )
+
+        self.assertEqual(features.index.get_loc(x_test.index[0]) - features.index.get_loc(x_train.index[-1]), 2)
+        self.assertTrue(x_train.index.equals(rewards_train.index))
+        self.assertTrue(x_test.index.equals(rewards_test.index))
+        self.assertTrue(x_train.index.equals(pd.Index(index_train)))
+        self.assertTrue(x_test.index.equals(pd.Index(index_test)))
+
+    def test_deep_q_learning_validates_configuration(self):
+        data = make_market_data(periods=20)
+        invalid_options = (
+            {"alpha": 0}, {"gamma": 1}, {"epsilon": 1.1},
+            {"epsilon_decay": 0}, {"epsilon_min": 0.6, "epsilon": 0.5},
+            {"episodes": 0}, {"episodes": 1.5}, {"split_ratio": 1},
+            {"hidden_units": 0}, {"verbose": -1}, {"random_state": -1},
+            {"progress_interval": 0},
+        )
+
+        for options in invalid_options:
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                DeepQLearningAgent(data, **options)
+
+    def test_deep_q_learning_randomness_is_reproducible(self):
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(data, random_state=17)
+
+        with patch("agents.ml_based.reinforcement_learning.deep_q_learning_agent.tf") as tf_mock:
+            first_rng = agent._training_rng()
+            second_rng = agent._training_rng()
+
+        np.testing.assert_array_equal(first_rng.integers(100, size=10), second_rng.integers(100, size=10))
+        self.assertEqual(tf_mock.keras.utils.set_random_seed.call_count, 2)
+        tf_mock.keras.utils.set_random_seed.assert_called_with(17)
+
+    def test_deep_q_learning_reports_progress_and_uses_batch_training(self):
+        class DummyModel:
+            def __init__(self):
+                self.batch_calls = 0
+
+            def predict(self, features, verbose=0):
+                return np.zeros((len(features), 2), dtype=float)
+
+            def train_on_batch(self, features, targets):
+                self.batch_calls += 1
+
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(
+            data, episodes=2, verbose=1, progress_interval=1, random_state=7
+        )
+        model = DummyModel()
+        with patch.object(agent, "_require_tensorflow"), patch.object(
+            agent, "_training_rng", return_value=np.random.default_rng(7)
+        ), patch.object(agent, "build_model", return_value=model), patch("builtins.print") as printer:
+            agent.train_model("AAA")
+
+        output = " ".join(str(call) for call in printer.call_args_list)
+        self.assertIn("episode 1/2", output)
+        self.assertIn("episode 2/2", output)
+        self.assertIn("steps/s", output)
+        self.assertGreater(model.batch_calls, 0)
+        self.assertIn("TrainingSeconds", agent.training_info["AAA"])
 
     def test_quantile_regression_agent_uses_purged_time_split_and_live_row(self):
         data = make_market_data(periods=100)
