@@ -1,7 +1,7 @@
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pandas as pd
@@ -908,16 +908,33 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(tf_mock.keras.utils.set_random_seed.call_count, 2)
         tf_mock.keras.utils.set_random_seed.assert_called_with(17)
 
+    def test_deep_q_learning_retries_tensorflow_import_lazily(self):
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(data)
+        fake_tf = Mock()
+        fake_layers = Mock(Dense=Mock(), Input=Mock())
+        fake_models = Mock(Sequential=Mock())
+        module = "agents.ml_based.reinforcement_learning.deep_q_learning_agent"
+
+        with patch(f"{module}.Sequential", None), patch(
+            f"{module}.import_module", side_effect=[fake_tf, fake_layers, fake_models]
+        ) as importer:
+            agent._require_tensorflow()
+
+        self.assertEqual(importer.call_count, 3)
+
     def test_deep_q_learning_reports_progress_and_uses_batch_training(self):
         class DummyModel:
             def __init__(self):
                 self.batch_calls = 0
+                self.batch_sizes = []
 
             def predict(self, features, verbose=0):
                 return np.zeros((len(features), 2), dtype=float)
 
             def train_on_batch(self, features, targets):
                 self.batch_calls += 1
+                self.batch_sizes.append(len(features))
 
         data = make_market_data(periods=20)
         agent = DeepQLearningAgent(
@@ -933,8 +950,10 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("episode 1/2", output)
         self.assertIn("episode 2/2", output)
         self.assertIn("steps/s", output)
-        self.assertGreater(model.batch_calls, 0)
+        self.assertEqual(model.batch_calls, 2)
+        self.assertEqual(model.batch_sizes, [len(agent.train_data["AAA"]["X_train"])] * 2)
         self.assertIn("TrainingSeconds", agent.training_info["AAA"])
+        self.assertEqual(agent.training_info["AAA"]["TrainingUpdates"], 2)
 
     def test_quantile_regression_agent_uses_purged_time_split_and_live_row(self):
         data = make_market_data(periods=100)

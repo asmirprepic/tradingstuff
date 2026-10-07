@@ -1,4 +1,5 @@
 import time
+from importlib import import_module
 
 import numpy as np
 import pandas as pd
@@ -8,10 +9,10 @@ from agents.base_agents.trading_agent import TradingAgent
 
 try:
     import tensorflow as tf
-    from tensorflow.keras.layers import Dense
+    from tensorflow.keras.layers import Dense, Input
     from tensorflow.keras.models import Sequential
 except ModuleNotFoundError as exc:
-    tf = Dense = Sequential = None
+    tf = Dense = Input = Sequential = None
     _TENSORFLOW_IMPORT_ERROR = exc
 else:
     _TENSORFLOW_IMPORT_ERROR = None
@@ -101,17 +102,68 @@ class DeepQLearningAgent(TradingAgent):
         return np.random.default_rng(self.random_state)
 
     def _require_tensorflow(self):
-        if Sequential is None:
+        global tf, Dense, Input, Sequential, _TENSORFLOW_IMPORT_ERROR
+        if Sequential is not None:
+            return
+        try:
+            tf = import_module("tensorflow")
+            layers = import_module("tensorflow.keras.layers")
+            models = import_module("tensorflow.keras.models")
+            Dense = layers.Dense
+            Input = layers.Input
+            Sequential = models.Sequential
+            _TENSORFLOW_IMPORT_ERROR = None
+        except ModuleNotFoundError as exc:
+            _TENSORFLOW_IMPORT_ERROR = exc
             raise ModuleNotFoundError(
                 "tensorflow is required to train DeepQLearningAgent. "
-                "Install tensorflow before using this agent."
-            ) from _TENSORFLOW_IMPORT_ERROR
+                "Install it in the active Python environment and restart or reload the notebook."
+            ) from exc
 
     def build_feature_frame(self, stock):
         df = self.data[stock].copy()
-        df["Open-Close"] = df["Open"] - df["Close"]
-        df["High-Low"] = df["High"] - df["Low"]
-        return df.dropna(subset=["Open-Close", "High-Low", "Close"])
+        required = ["Open", "High", "Low", "Close", "Volume"]
+        missing = [
+            column for column in required
+            if column not in df.columns
+        ]
+
+        if missing:
+            raise ValueError(
+                f"{stock} is missing columns: {missing}"
+            )
+
+        close = df["Close"]
+
+        df["Return_1D"] = close.pct_change(
+            fill_method  = None
+        )
+        df["Return_5D"] = close.pct_change(
+            periods = 5,
+            fill_method = None,
+        )
+        df["Intraday_Return"] = (
+            close.div(df["Open"]).sub(1.0)
+        )
+        df["Volatility_5D"] = (
+            df["Return_1D"].rolling(5).std()
+        )
+
+        moving_average = close.rolling(20).mean()
+        df["MA_Distance_20"] = (
+            close.div(moving_average).sub(1.0)
+        )
+        df["Volume_Change"] = df["Volume"].pct_change(
+            fill_method = None
+        )
+
+        df[self.features] = df[self.features].replace(
+          [np.inf, -np.inf],
+          np.nan,
+        )
+        return df.dropna(
+          subset=[*self.features, "Close"]
+      )
 
     def feature_engineering(self, stock):
         df = self.build_feature_frame(stock)
@@ -145,7 +197,8 @@ class DeepQLearningAgent(TradingAgent):
     def build_model(self, input_dim):
         model = Sequential(
             [
-                Dense(self.hidden_units, input_dim=input_dim, activation="relu"),
+                Input(shape=(input_dim,)),
+                Dense(self.hidden_units, activation="relu"),
                 Dense(self.hidden_units, activation="relu"),
                 Dense(2, activation="linear"),
             ]
@@ -195,27 +248,42 @@ class DeepQLearningAgent(TradingAgent):
             )
 
         for episode in range(1, self.episodes + 1):
-            state = 0
-            episode_reward = 0.0
-            episode_steps = 0
-            while state < len(X_train_norm) - 1:
-                if rng.random() <= epsilon:
-                    action = int(rng.integers(2))
-                else:
-                    action = int(np.argmax(self._predict_q_values(model, X_train_norm[state:state + 1])[0]))
+            q_values = self._predict_q_values(model, X_train_norm)
+            episode_steps = len(X_train_norm)
 
-                next_state = state + 1
-                reward = reward_values[state] if action == 1 else 0.0
-                adjacent_q = self._predict_q_values(model, X_train_norm[state:next_state + 1])
-                next_q = adjacent_q[1]
-                target = reward + self.gamma * float(np.max(next_q))
-                target_f = adjacent_q[0:1].copy()
-                target_f[0, action] = target
-                model.train_on_batch(X_train_norm[state:state + 1], target_f)
-                episode_reward += reward
-                episode_steps += 1
-                total_steps += 1
-                state = next_state
+            greedy_actions = np.argmax(q_values, axis = 1)
+            explore = rng.random(episode_steps) <= epsilon
+            random_actions = rng.integers(2, size = episode_steps)
+            actions = np.where(
+                explore,
+                random_actions,
+                greedy_actions,
+            ).astype(int)
+
+            realized_rewards = np.where(
+                actions == 1,
+                reward_values,
+                0.0,
+            )
+
+            targets = realized_rewards.copy()
+            targets[:-1] += (
+                self.gamma * np.max(q_values[1:], axis = 1)
+            )
+
+            training_targets = q_values.copy()
+            training_targets[
+                np.arange(episode_steps),
+                actions
+            ] = targets
+
+            model.train_on_batch(
+                X_train_norm,
+                training_targets,
+            )
+
+            episode_reward = float(realized_rewards.sum())
+            total_steps += episode_steps
 
             if epsilon > self.epsilon_min:
                 epsilon = max(self.epsilon_min, epsilon * self.epsilon_decay)
@@ -255,6 +323,7 @@ class DeepQLearningAgent(TradingAgent):
             "Episodes": self.episodes,
             "EpsilonFinal": epsilon,
             "TrainingSeconds": training_seconds,
+            "TrainingUpdates": self.episodes,
         }
 
     def predict_signals(self, stock, mode="backtest", threshold=0.0):
