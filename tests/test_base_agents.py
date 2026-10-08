@@ -866,7 +866,7 @@ class BaseAgentsTests(unittest.TestCase):
             PerceptronAgent(data, max_iter=0)
 
     def test_deep_q_learning_split_purges_boundary_reward(self):
-        data = make_market_data(periods=20)
+        data = make_market_data(periods=60)
         agent = DeepQLearningAgent(data, split_ratio=0.8)
         features, rewards = agent.feature_engineering("AAA")
 
@@ -890,11 +890,25 @@ class BaseAgentsTests(unittest.TestCase):
             {"episodes": 0}, {"episodes": 1.5}, {"split_ratio": 1},
             {"hidden_units": 0}, {"verbose": -1}, {"random_state": -1},
             {"progress_interval": 0},
+            {"features": []}, {"features": "Return_1D"},
+            {"features": ["Return_1D", "Return_1D"]},
+            {"features": ["UnknownFeature"]},
         )
 
         for options in invalid_options:
             with self.subTest(options=options), self.assertRaises(ValueError):
                 DeepQLearningAgent(data, **options)
+
+    def test_deep_q_learning_supports_feature_subsets_and_dependencies(self):
+        data = make_market_data(periods=30)
+        close_only = data.loc[:, pd.IndexSlice[:, ["Close"]]]
+        agent = DeepQLearningAgent(close_only, features=["Return_1D", "Volatility_5D"])
+
+        features, rewards = agent.feature_engineering("AAA")
+
+        self.assertListEqual(features.columns.tolist(), ["Return_1D", "Volatility_5D"])
+        self.assertTrue(features.index.equals(rewards.index))
+        self.assertGreater(len(features), 0)
 
     def test_deep_q_learning_randomness_is_reproducible(self):
         data = make_market_data(periods=20)
@@ -936,7 +950,7 @@ class BaseAgentsTests(unittest.TestCase):
                 self.batch_calls += 1
                 self.batch_sizes.append(len(features))
 
-        data = make_market_data(periods=20)
+        data = make_market_data(periods=60)
         agent = DeepQLearningAgent(
             data, episodes=2, verbose=1, progress_interval=1, random_state=7
         )

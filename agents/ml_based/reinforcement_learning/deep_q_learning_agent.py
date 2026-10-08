@@ -26,6 +26,15 @@ class DeepQLearningAgent(TradingAgent):
     features and next-bar log returns. The implementation is intentionally
     lightweight so it fits the shared TradingAgent contract cleanly.
     """
+    DEFAULT_FEATURES = (
+        "Return_1D",
+        "Return_5D",
+        "Intraday_Return",
+        "Range_Pct",
+        "Volatility_5D",
+        "MA_Distance_20",
+        "Volume_Change",
+    )
 
     def __init__(
         self,
@@ -41,6 +50,7 @@ class DeepQLearningAgent(TradingAgent):
         verbose=0,
         random_state=42,
         progress_interval=10,
+        features=None,
     ):
         super().__init__(data)
         self._validate_parameters(
@@ -62,6 +72,17 @@ class DeepQLearningAgent(TradingAgent):
         self.verbose = verbose
         self.random_state = int(random_state)
         self.progress_interval = int(progress_interval)
+
+        if isinstance(features, str):
+            raise ValueError("features must be a sequence of feature names, not a string.")
+        self.features = list(features if features is not None else self.DEFAULT_FEATURES)
+        if not self.features:
+            raise ValueError("At least one feature must be selected.")
+        if len(self.features) != len(set(self.features)):
+            raise ValueError("features must not contain duplicates.")
+        unknown = sorted(set(self.features) - set(self.DEFAULT_FEATURES))
+        if unknown:
+            raise ValueError(f"Unsupported features: {unknown}")
 
         self.models = {}
         self.train_data = {}
@@ -122,9 +143,15 @@ class DeepQLearningAgent(TradingAgent):
 
     def build_feature_frame(self, stock):
         df = self.data[stock].copy()
-        required = ["Open", "High", "Low", "Close", "Volume"]
+        required = {"Close"}
+        if "Intraday_Return" in self.features:
+            required.add("Open")
+        if "Range_Pct" in self.features:
+            required.update(("High", "Low"))
+        if "Volume_Change" in self.features:
+            required.add("Volume")
         missing = [
-            column for column in required
+            column for column in sorted(required)
             if column not in df.columns
         ]
 
@@ -135,41 +162,33 @@ class DeepQLearningAgent(TradingAgent):
 
         close = df["Close"]
 
-        df["Return_1D"] = close.pct_change(
-            fill_method  = None
-        )
-        df["Return_5D"] = close.pct_change(
-            periods = 5,
-            fill_method = None,
-        )
-        df["Intraday_Return"] = (
-            close.div(df["Open"]).sub(1.0)
-        )
-        df["Volatility_5D"] = (
-            df["Return_1D"].rolling(5).std()
-        )
-
-        moving_average = close.rolling(20).mean()
-        df["MA_Distance_20"] = (
-            close.div(moving_average).sub(1.0)
-        )
-        df["Volume_Change"] = df["Volume"].pct_change(
-            fill_method = None
-        )
+        if "Return_1D" in self.features or "Volatility_5D" in self.features:
+            df["Return_1D"] = close.pct_change(fill_method=None)
+        if "Return_5D" in self.features:
+            df["Return_5D"] = close.pct_change(periods=5, fill_method=None)
+        if "Intraday_Return" in self.features:
+            df["Intraday_Return"] = close.div(df["Open"]).sub(1.0)
+        if "Range_Pct" in self.features:
+            df["Range_Pct"] = df["High"].sub(df["Low"]).div(close)
+        if "Volatility_5D" in self.features:
+            df["Volatility_5D"] = df["Return_1D"].rolling(5).std()
+        if "MA_Distance_20" in self.features:
+            moving_average = close.rolling(20).mean()
+            df["MA_Distance_20"] = close.div(moving_average).sub(1.0)
+        if "Volume_Change" in self.features:
+            df["Volume_Change"] = df["Volume"].pct_change(fill_method=None)
 
         df[self.features] = df[self.features].replace(
-          [np.inf, -np.inf],
-          np.nan,
+            [np.inf, -np.inf],
+            np.nan,
         )
-        return df.dropna(
-          subset=[*self.features, "Close"]
-      )
+        return df.dropna(subset=[*self.features, "Close"])
 
     def feature_engineering(self, stock):
         df = self.build_feature_frame(stock)
         df["ForwardReturn"] = np.log(df["Close"].shift(-1) / df["Close"])
         df = df.iloc[:-1].dropna(subset=["ForwardReturn"])
-        X = df[["Open-Close", "High-Low"]].copy()
+        X = df[self.features].copy()
         rewards = df["ForwardReturn"].copy()
         return X, rewards
 
@@ -260,11 +279,25 @@ class DeepQLearningAgent(TradingAgent):
                 greedy_actions,
             ).astype(int)
 
-            realized_rewards = np.where(
-                actions == 1,
+
+            clipped_returns = np.clip(
                 reward_values,
+                -0.05,
+                0.05
+            )
+
+            downside = np.maximum(
+                -clipped_returns,
                 0.0,
             )
+
+            utility = clipped_returns - 0.5 * downside
+
+            realized_rewards = np.where(
+                actions == 1,
+                utility,
+                0.0
+            ) * 100
 
             targets = realized_rewards.copy()
             targets[:-1] += (
@@ -341,7 +374,9 @@ class DeepQLearningAgent(TradingAgent):
             X_pred = train_data["X_test"]
             index_used = train_data["index_test"]
         elif mode == "live":
-            X_full = self.build_feature_frame(stock)[["Open-Close", "High-Low"]]
+            X_full = self.build_feature_frame(stock)[
+                self.features
+            ]
             X_pred = X_full.iloc[[-1]]
             index_used = pd.Index([X_full.index[-1]])
         else:
