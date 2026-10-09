@@ -1,7 +1,7 @@
 import unittest
 import uuid
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import pandas as pd
@@ -866,7 +866,7 @@ class BaseAgentsTests(unittest.TestCase):
             PerceptronAgent(data, max_iter=0)
 
     def test_deep_q_learning_split_purges_boundary_reward(self):
-        data = make_market_data(periods=20)
+        data = make_market_data(periods=60)
         agent = DeepQLearningAgent(data, split_ratio=0.8)
         features, rewards = agent.feature_engineering("AAA")
 
@@ -890,11 +890,26 @@ class BaseAgentsTests(unittest.TestCase):
             {"episodes": 0}, {"episodes": 1.5}, {"split_ratio": 1},
             {"hidden_units": 0}, {"verbose": -1}, {"random_state": -1},
             {"progress_interval": 0},
+            {"features": []}, {"features": "Return_1D"},
+            {"features": ["Return_1D", "Return_1D"]},
+            {"features": ["UnknownFeature"]},
+            {"transaction_cost": -0.001},
         )
 
         for options in invalid_options:
             with self.subTest(options=options), self.assertRaises(ValueError):
                 DeepQLearningAgent(data, **options)
+
+    def test_deep_q_learning_supports_feature_subsets_and_dependencies(self):
+        data = make_market_data(periods=30)
+        close_only = data.loc[:, pd.IndexSlice[:, ["Close"]]]
+        agent = DeepQLearningAgent(close_only, features=["Return_1D", "Volatility_5D"])
+
+        features, rewards = agent.feature_engineering("AAA")
+
+        self.assertListEqual(features.columns.tolist(), ["Return_1D", "Volatility_5D"])
+        self.assertTrue(features.index.equals(rewards.index))
+        self.assertGreater(len(features), 0)
 
     def test_deep_q_learning_randomness_is_reproducible(self):
         data = make_market_data(periods=20)
@@ -908,18 +923,35 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(tf_mock.keras.utils.set_random_seed.call_count, 2)
         tf_mock.keras.utils.set_random_seed.assert_called_with(17)
 
+    def test_deep_q_learning_retries_tensorflow_import_lazily(self):
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(data)
+        fake_tf = Mock()
+        fake_layers = Mock(Dense=Mock(), Input=Mock())
+        fake_models = Mock(Sequential=Mock())
+        module = "agents.ml_based.reinforcement_learning.deep_q_learning_agent"
+
+        with patch(f"{module}.Sequential", None), patch(
+            f"{module}.import_module", side_effect=[fake_tf, fake_layers, fake_models]
+        ) as importer:
+            agent._require_tensorflow()
+
+        self.assertEqual(importer.call_count, 3)
+
     def test_deep_q_learning_reports_progress_and_uses_batch_training(self):
         class DummyModel:
             def __init__(self):
                 self.batch_calls = 0
+                self.batch_sizes = []
 
             def predict(self, features, verbose=0):
                 return np.zeros((len(features), 2), dtype=float)
 
             def train_on_batch(self, features, targets):
                 self.batch_calls += 1
+                self.batch_sizes.append(len(features))
 
-        data = make_market_data(periods=20)
+        data = make_market_data(periods=60)
         agent = DeepQLearningAgent(
             data, episodes=2, verbose=1, progress_interval=1, random_state=7
         )
@@ -933,8 +965,30 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("episode 1/2", output)
         self.assertIn("episode 2/2", output)
         self.assertIn("steps/s", output)
-        self.assertGreater(model.batch_calls, 0)
+        self.assertEqual(model.batch_calls, 2)
+        self.assertEqual(model.batch_sizes, [len(agent.train_data["AAA"]["X_train"])] * 2)
+        self.assertEqual(
+            agent.train_data["AAA"]["StateFeatures"][-1],
+            "CurrentPosition",
+        )
         self.assertIn("TrainingSeconds", agent.training_info["AAA"])
+        self.assertEqual(agent.training_info["AAA"]["TrainingUpdates"], 2)
+
+    def test_deep_q_learning_policy_carries_current_position(self):
+        q_values_by_position = np.array(
+            [
+                [[0.0, 1.0], [1.0, 0.0]],
+                [[0.0, 1.0], [1.0, 0.0]],
+                [[0.0, 1.0], [1.0, 0.0]],
+            ]
+        )
+
+        current_positions, actions, _ = DeepQLearningAgent._policy_trajectory(
+            q_values_by_position,
+        )
+
+        np.testing.assert_array_equal(current_positions, [0, 1, 0])
+        np.testing.assert_array_equal(actions, [1, 0, 1])
 
     def test_quantile_regression_agent_uses_purged_time_split_and_live_row(self):
         data = make_market_data(periods=100)
