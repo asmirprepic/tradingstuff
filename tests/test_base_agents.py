@@ -893,6 +893,7 @@ class BaseAgentsTests(unittest.TestCase):
             {"features": []}, {"features": "Return_1D"},
             {"features": ["Return_1D", "Return_1D"]},
             {"features": ["UnknownFeature"]},
+            {"transaction_cost": -0.001},
         )
 
         for options in invalid_options:
@@ -966,8 +967,28 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("steps/s", output)
         self.assertEqual(model.batch_calls, 2)
         self.assertEqual(model.batch_sizes, [len(agent.train_data["AAA"]["X_train"])] * 2)
+        self.assertEqual(
+            agent.train_data["AAA"]["StateFeatures"][-1],
+            "CurrentPosition",
+        )
         self.assertIn("TrainingSeconds", agent.training_info["AAA"])
         self.assertEqual(agent.training_info["AAA"]["TrainingUpdates"], 2)
+
+    def test_deep_q_learning_policy_carries_current_position(self):
+        q_values_by_position = np.array(
+            [
+                [[0.0, 1.0], [1.0, 0.0]],
+                [[0.0, 1.0], [1.0, 0.0]],
+                [[0.0, 1.0], [1.0, 0.0]],
+            ]
+        )
+
+        current_positions, actions, _ = DeepQLearningAgent._policy_trajectory(
+            q_values_by_position,
+        )
+
+        np.testing.assert_array_equal(current_positions, [0, 1, 0])
+        np.testing.assert_array_equal(actions, [1, 0, 1])
 
     def test_quantile_regression_agent_uses_purged_time_split_and_live_row(self):
         data = make_market_data(periods=100)

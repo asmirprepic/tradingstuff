@@ -51,11 +51,13 @@ class DeepQLearningAgent(TradingAgent):
         random_state=42,
         progress_interval=10,
         features=None,
+        transaction_cost=0.0,
     ):
         super().__init__(data)
         self._validate_parameters(
             alpha, gamma, epsilon, epsilon_decay, epsilon_min,
             episodes, split_ratio, hidden_units, verbose, random_state, progress_interval,
+            transaction_cost,
         )
         self.algorithm_name = "DeepQLearning"
         self.score_column = "SignalStrength"
@@ -72,6 +74,7 @@ class DeepQLearningAgent(TradingAgent):
         self.verbose = verbose
         self.random_state = int(random_state)
         self.progress_interval = int(progress_interval)
+        self.transaction_cost = float(transaction_cost)
 
         if isinstance(features, str):
             raise ValueError("features must be a sequence of feature names, not a string.")
@@ -90,7 +93,7 @@ class DeepQLearningAgent(TradingAgent):
     @staticmethod
     def _validate_parameters(alpha, gamma, epsilon, epsilon_decay, epsilon_min,
                              episodes, split_ratio, hidden_units, verbose, random_state,
-                             progress_interval):
+                             progress_interval, transaction_cost):
         if alpha <= 0:
             raise ValueError("alpha must be positive.")
         if not 0 <= gamma < 1:
@@ -117,6 +120,11 @@ class DeepQLearningAgent(TradingAgent):
                 or not isinstance(random_state, (int, np.integer))
                 or random_state < 0):
             raise ValueError("random_state must be a non-negative integer.")
+        if (isinstance(transaction_cost, bool)
+                or not isinstance(transaction_cost, (int, float, np.number))
+                or not np.isfinite(transaction_cost)
+                or transaction_cost < 0):
+            raise ValueError("transaction_cost must be a non-negative finite number.")
 
     def _training_rng(self):
         tf.keras.utils.set_random_seed(self.random_state)
@@ -231,6 +239,42 @@ class DeepQLearningAgent(TradingAgent):
     def _predict_q_values(self, model, X):
         return model.predict(X, verbose=0)
 
+    def _q_values_by_position(self, model, market_features):
+        """Evaluate every row for both possible positions in one model call."""
+        row_count = len(market_features)
+        flat_states = np.column_stack((market_features, np.zeros(row_count)))
+        long_states = np.column_stack((market_features, np.ones(row_count)))
+        predictions = self._predict_q_values(
+            model,
+            np.vstack((flat_states, long_states)),
+        )
+        return np.stack(
+            (predictions[:row_count], predictions[row_count:]),
+            axis=1,
+        )
+
+    @staticmethod
+    def _policy_trajectory(q_values_by_position, threshold=0.0, epsilon=0.0,
+                           rng=None, initial_position=0):
+        row_count = len(q_values_by_position)
+        current_positions = np.empty(row_count, dtype=int)
+        actions = np.empty(row_count, dtype=int)
+        selected_q_values = np.empty((row_count, 2), dtype=float)
+        current_position = int(initial_position)
+
+        for row in range(row_count):
+            current_positions[row] = current_position
+            q_values = q_values_by_position[row, current_position]
+            selected_q_values[row] = q_values
+            if rng is not None and rng.random() <= epsilon:
+                action = int(rng.integers(2))
+            else:
+                action = int(q_values[1] - q_values[0] > threshold)
+            actions[row] = action
+            current_position = action
+
+        return current_positions, actions, selected_q_values
+
     def train_model(self, stock):
         self._require_tensorflow()
         rng = self._training_rng()
@@ -254,7 +298,7 @@ class DeepQLearningAgent(TradingAgent):
         X_train_norm = ((X_train - mu) / sigma).to_numpy(dtype=float)
         X_test_norm = ((X_test - mu) / sigma).to_numpy(dtype=float)
 
-        model = self.build_model(input_dim=X_train_norm.shape[1])
+        model = self.build_model(input_dim=X_train_norm.shape[1] + 1)
         epsilon = float(self.epsilon)
         reward_values = rewards_train.to_numpy(dtype=float)
         started = time.perf_counter()
@@ -267,18 +311,13 @@ class DeepQLearningAgent(TradingAgent):
             )
 
         for episode in range(1, self.episodes + 1):
-            q_values = self._predict_q_values(model, X_train_norm)
             episode_steps = len(X_train_norm)
-
-            greedy_actions = np.argmax(q_values, axis = 1)
-            explore = rng.random(episode_steps) <= epsilon
-            random_actions = rng.integers(2, size = episode_steps)
-            actions = np.where(
-                explore,
-                random_actions,
-                greedy_actions,
-            ).astype(int)
-
+            q_values_by_position = self._q_values_by_position(model, X_train_norm)
+            current_positions, actions, q_values = self._policy_trajectory(
+                q_values_by_position,
+                epsilon=epsilon,
+                rng=rng,
+            )
 
             clipped_returns = np.clip(
                 reward_values,
@@ -297,12 +336,17 @@ class DeepQLearningAgent(TradingAgent):
                 actions == 1,
                 utility,
                 0.0
-            ) * 100
+            )
+            turnover = np.abs(actions - current_positions)
+            realized_rewards -= turnover * self.transaction_cost
 
             targets = realized_rewards.copy()
-            targets[:-1] += (
-                self.gamma * np.max(q_values[1:], axis = 1)
-            )
+            if episode_steps > 1:
+                next_q_values = q_values_by_position[
+                    np.arange(1, episode_steps),
+                    actions[:-1],
+                ]
+                targets[:-1] += self.gamma * np.max(next_q_values, axis=1)
 
             training_targets = q_values.copy()
             training_targets[
@@ -311,7 +355,7 @@ class DeepQLearningAgent(TradingAgent):
             ] = targets
 
             model.train_on_batch(
-                X_train_norm,
+                np.column_stack((X_train_norm, current_positions)),
                 training_targets,
             )
 
@@ -350,6 +394,7 @@ class DeepQLearningAgent(TradingAgent):
             "epsilon_final": epsilon,
             "X_train_norm": X_train_norm,
             "X_test_norm": X_test_norm,
+            "StateFeatures": [*self.features, "CurrentPosition"],
         }
         self.training_info[stock] = {
             "SplitRatio": self.split_ratio,
@@ -357,13 +402,16 @@ class DeepQLearningAgent(TradingAgent):
             "EpsilonFinal": epsilon,
             "TrainingSeconds": training_seconds,
             "TrainingUpdates": self.episodes,
+            "TransactionCost": self.transaction_cost,
         }
 
-    def predict_signals(self, stock, mode="backtest", threshold=0.0):
+    def predict_signals(self, stock, mode="backtest", threshold=0.0, initial_position=0):
         if stock not in self.models:
             raise ValueError(f"Model for {stock} has not been trained.")
         if stock not in self.train_data:
             raise ValueError(f"Training data for {stock} is missing.")
+        if initial_position not in (0, 1):
+            raise ValueError("initial_position must be 0 (flat) or 1 (long).")
 
         model = self.models[stock]
         train_data = self.train_data[stock]
@@ -386,50 +434,69 @@ class DeepQLearningAgent(TradingAgent):
             return pd.DataFrame(
                 columns=[
                     "Prediction",
+                    "CurrentPosition",
                     "FlatQ",
                     "LongQ",
                     "SignalStrength",
                     "Position",
                     "Signal",
+                    "Turnover",
+                    "TradingCost",
                     "return",
                 ]
             )
 
         X_pred_norm = ((X_pred - mu) / sigma).to_numpy(dtype=float)
-        q_values = self._predict_q_values(model, X_pred_norm)
+        q_values_by_position = self._q_values_by_position(model, X_pred_norm)
+        current_positions, predictions, q_values = self._policy_trajectory(
+            q_values_by_position,
+            threshold=threshold,
+            initial_position=initial_position,
+        )
         flat_q = q_values[:, 0]
         long_q = q_values[:, 1]
         q_edge = long_q - flat_q
-        predictions = np.where(q_edge > threshold, 1, 0)
 
         signals = pd.DataFrame(index=index_used)
         signals["Prediction"] = predictions
+        signals["CurrentPosition"] = current_positions
         signals["FlatQ"] = flat_q
         signals["LongQ"] = long_q
         signals["SignalStrength"] = q_edge
         signals["Position"] = predictions.astype(int)
         signals["Signal"] = 0
-        signals.loc[signals["Position"] > signals["Position"].shift(1), "Signal"] = 1
-        signals.loc[signals["Position"] < signals["Position"].shift(1), "Signal"] = -1
+        previous_positions = signals["Position"].shift(1)
+        previous_positions.iloc[0] = initial_position
+        signals.loc[signals["Position"] > previous_positions, "Signal"] = 1
+        signals.loc[signals["Position"] < previous_positions, "Signal"] = -1
+        signals["Turnover"] = np.abs(signals["Position"] - previous_positions)
+        signals["TradingCost"] = signals["Turnover"] * self.transaction_cost
 
         close = self.data[(stock, "Close")]
         signals["return"] = np.log(close / close.shift(1)).reindex(index_used)
         return signals
 
-    def generate_signal_strategy(self, stock, mode="backtest", threshold=0.0):
+    def generate_signal_strategy(self, stock, mode="backtest", threshold=0.0,
+                                 initial_position=0):
         if stock not in self.models:
             self.train_model(stock)
 
-        signals = self.predict_signals(stock, mode=mode, threshold=threshold)
+        signals = self.predict_signals(
+            stock,
+            mode=mode,
+            threshold=threshold,
+            initial_position=initial_position,
+        )
         self.signal_data[stock] = signals
         return signals
 
-    def run_all(self, mode="backtest", threshold=0.0):
+    def run_all(self, mode="backtest", threshold=0.0, initial_position=0):
         self.signal_data = {}
         for stock in self.stocks_in_data:
             self.signal_data[stock] = self.generate_signal_strategy(
                 stock,
                 mode=mode,
                 threshold=threshold,
+                initial_position=initial_position,
             )
         self.calculate_returns()

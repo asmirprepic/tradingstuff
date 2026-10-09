@@ -402,7 +402,13 @@ class TradingAgent(ABC):
 
         algorithm_name = self.algorithm_name
         signals = signals.dropna(subset=['return', 'Position']).copy()
-        signals['agent_returns'] = signals['return']*signals['Position'].shift(1)
+        trading_cost = signals.get(
+            'TradingCost',
+            pd.Series(0.0, index=signals.index),
+        ).shift(1).fillna(0.0)
+        signals['agent_returns'] = (
+            signals['return'] * signals['Position'].shift(1) - trading_cost
+        )
         strategy_return = round(signals['agent_returns'].sum()*100,3)
         buy_and_hold_return = round(signals['return'].sum()*100,3)
         total_entries = int(signals['Position'].diff().fillna(0).abs().sum() / 2)
@@ -429,7 +435,12 @@ class TradingAgent(ABC):
             if len(df) < 2:
                 continue
 
-            strategy_return = (df['return'] * df['Position'].shift(1)).sum()
+            trading_cost = df.get(
+                'TradingCost',
+                pd.Series(0.0, index=df.index),
+            ).shift(1).fillna(0.0)
+            agent_returns = df['return'] * df['Position'].shift(1) - trading_cost
+            strategy_return = agent_returns.sum()
 
             close_series = self.data[(stock,'Close')]
             signal_index = df.index[[0, -1]]
@@ -437,7 +448,7 @@ class TradingAgent(ABC):
                 close_series.loc[signal_index[-1]] / close_series.loc[signal_index[0]]
             )
 
-            cumulative_returns = (df['return'] * df['Position'].shift(1)).cumsum()
+            cumulative_returns = agent_returns.cumsum()
             running_max = cumulative_returns.cummax()
             drawdown = cumulative_returns - running_max
             max_drawdown = drawdown.min()
