@@ -894,6 +894,7 @@ class BaseAgentsTests(unittest.TestCase):
             {"features": ["Return_1D", "Return_1D"]},
             {"features": ["UnknownFeature"]},
             {"transaction_cost": -0.001},
+            {"min_holding_period": -1}, {"cooldown_period": 1.5},
         )
 
         for options in invalid_options:
@@ -967,28 +968,60 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("steps/s", output)
         self.assertEqual(model.batch_calls, 2)
         self.assertEqual(model.batch_sizes, [len(agent.train_data["AAA"]["X_train"])] * 2)
-        self.assertEqual(
-            agent.train_data["AAA"]["StateFeatures"][-1],
-            "CurrentPosition",
+        self.assertListEqual(
+            agent.train_data["AAA"]["StateFeatures"][-5:],
+            [
+                "CurrentPosition",
+                "HoldingProgress",
+                "CooldownProgress",
+                "CurrentDrawdown",
+                "MaxDrawdown",
+            ],
         )
         self.assertIn("TrainingSeconds", agent.training_info["AAA"])
         self.assertEqual(agent.training_info["AAA"]["TrainingUpdates"], 2)
 
-    def test_deep_q_learning_policy_carries_current_position(self):
-        q_values_by_position = np.array(
-            [
-                [[0.0, 1.0], [1.0, 0.0]],
-                [[0.0, 1.0], [1.0, 0.0]],
-                [[0.0, 1.0], [1.0, 0.0]],
-            ]
+    def test_deep_q_learning_rollout_enforces_holding_period_and_cooldown(self):
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(
+            data,
+            min_holding_period=2,
+            cooldown_period=2,
         )
 
-        current_positions, actions, _ = DeepQLearningAgent._policy_trajectory(
-            q_values_by_position,
+        def switch_position(state):
+            current_position = int(state[-5])
+            return np.array([[1.0, 0.0] if current_position else [0.0, 1.0]])
+
+        rollout = agent._state_rollout(
+            np.zeros((6, 1)),
+            np.zeros(6),
+            switch_position,
         )
 
-        np.testing.assert_array_equal(current_positions, [0, 1, 0])
-        np.testing.assert_array_equal(actions, [1, 0, 1])
+        np.testing.assert_array_equal(rollout["positions"], [0, 1, 1, 0, 0, 0])
+        np.testing.assert_array_equal(rollout["actions"], [1, 1, 0, 0, 0, 1])
+        np.testing.assert_array_equal(rollout["holding_periods"], [0, 1, 2, 0, 0, 0])
+        np.testing.assert_array_equal(rollout["cooldowns"], [0, 0, 0, 2, 1, 0])
+
+    def test_deep_q_learning_drawdown_state_uses_only_prior_returns(self):
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(data)
+
+        rollout = agent._state_rollout(
+            np.zeros((3, 1)),
+            np.array([0.1, -0.2, 0.0]),
+            lambda state: np.array([[0.0, 1.0]]),
+        )
+
+        np.testing.assert_allclose(
+            rollout["drawdowns"],
+            [0.0, 0.0, np.exp(-0.2) - 1.0],
+        )
+        np.testing.assert_allclose(
+            rollout["max_drawdowns"],
+            [0.0, 0.0, np.exp(-0.2) - 1.0],
+        )
 
     def test_quantile_regression_agent_uses_purged_time_split_and_live_row(self):
         data = make_market_data(periods=100)
