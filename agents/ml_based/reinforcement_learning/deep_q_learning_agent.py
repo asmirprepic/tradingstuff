@@ -39,14 +39,14 @@ class DeepQLearningAgent(TradingAgent):
     def __init__(
         self,
         data,
-        alpha=0.001,
+        alpha=0.0003,
         gamma=0.95,
         epsilon=1.0,
         epsilon_decay=0.995,
         epsilon_min=0.01,
         episodes=100,
         split_ratio=0.8,
-        hidden_units=24,
+        hidden_units=16,
         verbose=0,
         random_state=42,
         progress_interval=10,
@@ -236,14 +236,16 @@ class DeepQLearningAgent(TradingAgent):
         model = Sequential(
             [
                 Input(shape=(input_dim,)),
-                Dense(self.hidden_units, activation="relu"),
-                Dense(self.hidden_units, activation="relu"),
+                Dense(self.hidden_units, activation="swish"),
                 Dense(2, activation="linear"),
             ]
         )
         model.compile(
-            loss="mean_squared_error",
-            optimizer=tf.keras.optimizers.Adam(learning_rate=self.alpha),
+            loss=tf.keras.losses.Huber(delta=0.02),
+            optimizer=tf.keras.optimizers.Adam(
+                learning_rate=self.alpha,
+                clipnorm=1.0,
+            ),
         )
         return model
 
@@ -254,6 +256,19 @@ class DeepQLearningAgent(TradingAgent):
         """Create a low-overhead predictor for the fixed Sequential architecture."""
         if hasattr(model, "get_weights"):
             weights = model.get_weights()
+            if len(weights) == 4:
+                dense_weights = tuple(np.asarray(value) for value in weights)
+
+                def predict(states):
+                    values = np.atleast_2d(np.asarray(states, dtype=float))
+                    hidden = values @ dense_weights[0] + dense_weights[1]
+                    sigmoid = 1.0 / (1.0 + np.exp(-np.clip(hidden, -60.0, 60.0)))
+                    hidden *= sigmoid
+                    return hidden @ dense_weights[2] + dense_weights[3]
+
+                return predict
+
+            # Retain compatibility with models trained using the older 24x24 network.
             if len(weights) == 6:
                 dense_weights = tuple(np.asarray(value) for value in weights)
 
@@ -492,6 +507,8 @@ class DeepQLearningAgent(TradingAgent):
             "TransactionCost": self.transaction_cost,
             "MinHoldingPeriod": self.min_holding_period,
             "CooldownPeriod": self.cooldown_period,
+            "NetworkArchitecture": f"Dense({self.hidden_units}, swish) -> Dense(2, linear)",
+            "Loss": "Huber(delta=0.02)",
         }
 
     def predict_signals(self, stock, mode="backtest", threshold=0.0, initial_position=0,

@@ -924,6 +924,27 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertEqual(tf_mock.keras.utils.set_random_seed.call_count, 2)
         tf_mock.keras.utils.set_random_seed.assert_called_with(17)
 
+    def test_deep_q_learning_compact_predictor_matches_swish_network(self):
+        class CompactModel:
+            @staticmethod
+            def get_weights():
+                return [
+                    np.eye(2),
+                    np.zeros(2),
+                    np.array([[1.0, 2.0], [3.0, 4.0]]),
+                    np.array([0.5, -0.5]),
+                ]
+
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(data)
+        features = np.array([[-1.0, 2.0], [0.5, -0.5]])
+        hidden = features / (1.0 + np.exp(-features))
+        expected = hidden @ CompactModel.get_weights()[2] + CompactModel.get_weights()[3]
+
+        actual = agent._model_predictor(CompactModel())(features)
+
+        np.testing.assert_allclose(actual, expected)
+
     def test_deep_q_learning_retries_tensorflow_import_lazily(self):
         data = make_market_data(periods=20)
         agent = DeepQLearningAgent(data)
