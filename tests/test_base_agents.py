@@ -945,6 +945,44 @@ class BaseAgentsTests(unittest.TestCase):
 
         np.testing.assert_allclose(actual, expected)
 
+    def test_deep_q_learning_gamma_zero_trains_both_action_targets(self):
+        class DummyModel:
+            def __init__(self):
+                self.targets = None
+
+            def predict(self, features, verbose=0):
+                return np.zeros((len(features), 2), dtype=float)
+
+            def train_on_batch(self, features, targets):
+                self.targets = targets.copy()
+
+        data = make_market_data(periods=60)
+        agent = DeepQLearningAgent(data, gamma=0.0, episodes=1, epsilon=1.0)
+        model = DummyModel()
+        with patch.object(agent, "_require_tensorflow"), patch.object(
+            agent, "_training_rng", return_value=np.random.default_rng(7)
+        ), patch.object(agent, "build_model", return_value=model):
+            agent.train_model("AAA")
+
+        expected_long = agent._reward_utility(
+            agent.train_data["AAA"]["rewards_train"].to_numpy(dtype=float)
+        )
+        np.testing.assert_allclose(model.targets[:, 0], 0.0)
+        np.testing.assert_allclose(model.targets[:, 1], expected_long)
+        self.assertEqual(agent.training_info["AAA"]["EpsilonFinal"], 0.0)
+        self.assertEqual(agent.training_info["AAA"]["TrainingMode"], "AllActionTargets")
+
+    def test_deep_q_learning_action_targets_include_position_change_cost(self):
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(data, transaction_cost=0.001)
+
+        targets = agent._immediate_action_targets(
+            current_positions=np.array([0, 1]),
+            raw_returns=np.array([0.01, -0.01]),
+        )
+
+        np.testing.assert_allclose(targets, [[0.0, 0.009], [-0.001, -0.015]])
+
     def test_deep_q_learning_retries_tensorflow_import_lazily(self):
         data = make_market_data(periods=20)
         agent = DeepQLearningAgent(data)

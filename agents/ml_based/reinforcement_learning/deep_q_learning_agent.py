@@ -291,6 +291,14 @@ class DeepQLearningAgent(TradingAgent):
         downside = np.maximum(-clipped_returns, 0.0)
         return clipped_returns - 0.5 * downside
 
+    def _immediate_action_targets(self, current_positions, raw_returns):
+        """Return known flat and long rewards for every historical state."""
+        current_positions = np.asarray(current_positions, dtype=int)
+        utility = self._reward_utility(raw_returns)
+        flat_rewards = -current_positions * self.transaction_cost
+        long_rewards = utility - (1 - current_positions) * self.transaction_cost
+        return np.column_stack((flat_rewards, long_rewards))
+
     def _state_rollout(self, market_features, raw_returns, predictor, threshold=0.0,
                        epsilon=0.0, rng=None, initial_position=0,
                        initial_holding_period=0, initial_cooldown=0,
@@ -415,14 +423,16 @@ class DeepQLearningAgent(TradingAgent):
         X_test_norm = ((X_test - mu) / sigma).to_numpy(dtype=float)
 
         model = self.build_model(input_dim=X_train_norm.shape[1] + 5)
-        epsilon = float(self.epsilon)
+        train_all_actions = self.gamma == 0
+        epsilon = 0.0 if train_all_actions else float(self.epsilon)
         reward_values = rewards_train.to_numpy(dtype=float)
         started = time.perf_counter()
         total_steps = 0
         if self.verbose:
             print(
                 f"[DQN] {stock}: {len(X_train_norm)} training rows, "
-                f"{self.episodes} episodes",
+                f"{self.episodes} episodes | "
+                f"mode={'all-action targets' if train_all_actions else 'Q-learning'}",
                 flush=True,
             )
 
@@ -433,21 +443,27 @@ class DeepQLearningAgent(TradingAgent):
                 reward_values,
                 self._model_predictor(model),
                 epsilon=epsilon,
-                rng=rng,
+                rng=None if train_all_actions else rng,
             )
             q_values = rollout["q_values"]
             actions = rollout["actions"]
             realized_rewards = rollout["rewards"]
 
-            targets = realized_rewards.copy()
-            if episode_steps > 1:
-                targets[:-1] += self.gamma * np.max(q_values[1:], axis=1)
+            if train_all_actions:
+                training_targets = self._immediate_action_targets(
+                    rollout["positions"],
+                    reward_values,
+                )
+            else:
+                targets = realized_rewards.copy()
+                if episode_steps > 1:
+                    targets[:-1] += self.gamma * np.max(q_values[1:], axis=1)
 
-            training_targets = q_values.copy()
-            training_targets[
-                np.arange(episode_steps),
-                actions
-            ] = targets
+                training_targets = q_values.copy()
+                training_targets[
+                    np.arange(episode_steps),
+                    actions
+                ] = targets
 
             model.train_on_batch(
                 rollout["states"],
@@ -457,7 +473,7 @@ class DeepQLearningAgent(TradingAgent):
             episode_reward = float(realized_rewards.sum())
             total_steps += episode_steps
 
-            if epsilon > self.epsilon_min:
+            if not train_all_actions and epsilon > self.epsilon_min:
                 epsilon = max(self.epsilon_min, epsilon * self.epsilon_decay)
             should_report = (
                 self.verbose
@@ -507,6 +523,7 @@ class DeepQLearningAgent(TradingAgent):
             "TransactionCost": self.transaction_cost,
             "MinHoldingPeriod": self.min_holding_period,
             "CooldownPeriod": self.cooldown_period,
+            "TrainingMode": "AllActionTargets" if train_all_actions else "QLearning",
             "NetworkArchitecture": f"Dense({self.hidden_units}, swish) -> Dense(2, linear)",
             "Loss": "Huber(delta=0.02)",
         }
