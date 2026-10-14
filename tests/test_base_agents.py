@@ -882,6 +882,24 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertTrue(x_train.index.equals(pd.Index(index_train)))
         self.assertTrue(x_test.index.equals(pd.Index(index_test)))
 
+    def test_deep_q_learning_supports_multiday_targets_and_purges_horizon(self):
+        data = make_market_data(periods=60)
+        agent = DeepQLearningAgent(data, prediction_horizon=3)
+        features, rewards = agent.feature_engineering("AAA")
+        close = data[("AAA", "Close")]
+        expected = np.log(close.shift(-3) / close).reindex(rewards.index)
+
+        np.testing.assert_allclose(rewards, expected)
+
+        x_train, x_test, _, _, _, _ = agent.create_train_split_group(
+            features,
+            rewards,
+            features.index,
+            split_ratio=agent.split_ratio,
+        )
+        boundary = features.index.get_loc(x_test.index[0])
+        self.assertEqual(x_train.index[-1], features.index[boundary - 4])
+
     def test_deep_q_learning_validates_configuration(self):
         data = make_market_data(periods=20)
         invalid_options = (
@@ -895,6 +913,7 @@ class BaseAgentsTests(unittest.TestCase):
             {"features": ["UnknownFeature"]},
             {"transaction_cost": -0.001},
             {"min_holding_period": -1}, {"cooldown_period": 1.5},
+            {"prediction_horizon": 0}, {"prediction_horizon": 1.5},
         )
 
         for options in invalid_options:
