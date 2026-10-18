@@ -55,12 +55,14 @@ class DeepQLearningAgent(TradingAgent):
         min_holding_period=0,
         cooldown_period=0,
         prediction_horizon=1,
+        target_update_interval=25,
     ):
         super().__init__(data)
         self._validate_parameters(
             alpha, gamma, epsilon, epsilon_decay, epsilon_min,
             episodes, split_ratio, hidden_units, verbose, random_state, progress_interval,
             transaction_cost, min_holding_period, cooldown_period, prediction_horizon,
+            target_update_interval,
         )
         self.algorithm_name = "DeepQLearning"
         self.score_column = "SignalStrength"
@@ -81,6 +83,7 @@ class DeepQLearningAgent(TradingAgent):
         self.min_holding_period = int(min_holding_period)
         self.cooldown_period = int(cooldown_period)
         self.prediction_horizon = int(prediction_horizon)
+        self.target_update_interval = int(target_update_interval)
 
         if isinstance(features, str):
             raise ValueError("features must be a sequence of feature names, not a string.")
@@ -94,13 +97,14 @@ class DeepQLearningAgent(TradingAgent):
             raise ValueError(f"Unsupported features: {unknown}")
 
         self.models = {}
+        self.target_models = {}
         self.train_data = {}
 
     @staticmethod
     def _validate_parameters(alpha, gamma, epsilon, epsilon_decay, epsilon_min,
                              episodes, split_ratio, hidden_units, verbose, random_state,
                              progress_interval, transaction_cost, min_holding_period,
-                             cooldown_period, prediction_horizon):
+                             cooldown_period, prediction_horizon, target_update_interval):
         if alpha <= 0:
             raise ValueError("alpha must be positive.")
         if not 0 <= gamma < 1:
@@ -142,6 +146,10 @@ class DeepQLearningAgent(TradingAgent):
                 or not isinstance(prediction_horizon, (int, np.integer))
                 or prediction_horizon < 1):
             raise ValueError("prediction_horizon must be a positive integer.")
+        if (isinstance(target_update_interval, bool)
+                or not isinstance(target_update_interval, (int, np.integer))
+                or target_update_interval < 1):
+            raise ValueError("target_update_interval must be a positive integer.")
 
     def _training_rng(self):
         tf.keras.utils.set_random_seed(self.random_state)
@@ -262,6 +270,10 @@ class DeepQLearningAgent(TradingAgent):
 
     def _model_predictor(self, model):
         """Create a low-overhead predictor for the fixed Sequential architecture."""
+        def swish(values):
+            sigmoid = 1.0 / (1.0 + np.exp(-np.clip(values, -60.0, 60.0)))
+            return values * sigmoid
+
         if hasattr(model, "get_weights"):
             weights = model.get_weights()
             if len(weights) == 4:
@@ -269,21 +281,28 @@ class DeepQLearningAgent(TradingAgent):
 
                 def predict(states):
                     values = np.atleast_2d(np.asarray(states, dtype=float))
-                    hidden = values @ dense_weights[0] + dense_weights[1]
-                    sigmoid = 1.0 / (1.0 + np.exp(-np.clip(hidden, -60.0, 60.0)))
-                    hidden *= sigmoid
+                    hidden = swish(values @ dense_weights[0] + dense_weights[1])
                     return hidden @ dense_weights[2] + dense_weights[3]
 
                 return predict
 
-            # Retain compatibility with models trained using the older 24x24 network.
             if len(weights) == 6:
                 dense_weights = tuple(np.asarray(value) for value in weights)
+                activation_names = {
+                    getattr(getattr(layer, "activation", None), "__name__", "")
+                    for layer in getattr(model, "layers", [])[:2]
+                }
+                uses_swish = (
+                    bool(activation_names & {"swish", "silu"})
+                    or dense_weights[2].shape[1] != dense_weights[0].shape[1]
+                )
 
                 def predict(states):
                     values = np.atleast_2d(np.asarray(states, dtype=float))
-                    values = np.maximum(values @ dense_weights[0] + dense_weights[1], 0.0)
-                    values = np.maximum(values @ dense_weights[2] + dense_weights[3], 0.0)
+                    values = values @ dense_weights[0] + dense_weights[1]
+                    values = swish(values) if uses_swish else np.maximum(values, 0.0)
+                    values = values @ dense_weights[2] + dense_weights[3]
+                    values = swish(values) if uses_swish else np.maximum(values, 0.0)
                     return values @ dense_weights[4] + dense_weights[5]
 
                 return predict
@@ -443,6 +462,10 @@ class DeepQLearningAgent(TradingAgent):
 
         model = self.build_model(input_dim=X_train_norm.shape[1] + 5)
         train_all_actions = self.gamma == 0
+        target_model = None
+        if not train_all_actions:
+            target_model = self.build_model(input_dim=X_train_norm.shape[1] + 5)
+            target_model.set_weights(model.get_weights())
         epsilon = 0.0 if train_all_actions else float(self.epsilon)
         reward_values = rewards_train.to_numpy(dtype=float)
         started = time.perf_counter()
@@ -451,7 +474,7 @@ class DeepQLearningAgent(TradingAgent):
             print(
                 f"[DQN] {stock}: {len(X_train_norm)} training rows, "
                 f"{self.episodes} episodes | "
-                f"mode={'all-action targets' if train_all_actions else 'Q-learning'}",
+                f"mode={'all-action targets' if train_all_actions else 'Double DQN'}",
                 flush=True,
             )
 
@@ -477,7 +500,15 @@ class DeepQLearningAgent(TradingAgent):
             else:
                 targets = realized_rewards.copy()
                 if episode_steps > 1:
-                    targets[:-1] += self.gamma * np.max(q_values[1:], axis=1)
+                    next_actions = np.argmax(q_values[1:], axis=1)
+                    target_q_values = self._model_predictor(target_model)(
+                        rollout["states"][1:]
+                    )
+                    next_values = target_q_values[
+                        np.arange(episode_steps - 1),
+                        next_actions,
+                    ]
+                    targets[:-1] += self.gamma * next_values
 
                 training_targets = q_values.copy()
                 training_targets[
@@ -489,6 +520,8 @@ class DeepQLearningAgent(TradingAgent):
                 rollout["states"],
                 training_targets,
             )
+            if not train_all_actions and episode % self.target_update_interval == 0:
+                target_model.set_weights(model.get_weights())
 
             episode_reward = float(realized_rewards.sum())
             total_steps += episode_steps
@@ -513,6 +546,8 @@ class DeepQLearningAgent(TradingAgent):
         training_seconds = time.perf_counter() - started
 
         self.models[stock] = model
+        if target_model is not None:
+            self.target_models[stock] = target_model
         self.train_data[stock] = {
             "X_train": X_train,
             "X_test": X_test,
@@ -546,7 +581,9 @@ class DeepQLearningAgent(TradingAgent):
             "MinHoldingPeriod": self.min_holding_period,
             "CooldownPeriod": self.cooldown_period,
             "PredictionHorizon": self.prediction_horizon,
-            "TrainingMode": "AllActionTargets" if train_all_actions else "QLearning",
+            "TrainingMode": "AllActionTargets" if train_all_actions else "DoubleDQN",
+            "TargetUpdateInterval": self.target_update_interval if target_model is not None else None,
+            "DoubleDQN": target_model is not None,
             "NetworkArchitecture": f"Dense({self.hidden_units}, swish) -> Dense(2, linear)",
             "Loss": "Huber(delta=0.02)",
         }
