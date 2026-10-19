@@ -1,4 +1,5 @@
 import time
+from collections import deque
 from importlib import import_module
 
 import numpy as np
@@ -56,13 +57,17 @@ class DeepQLearningAgent(TradingAgent):
         cooldown_period=0,
         prediction_horizon=1,
         target_update_interval=25,
+        replay_capacity=10000,
+        replay_batch_size=64,
+        replay_updates_per_episode=None,
     ):
         super().__init__(data)
         self._validate_parameters(
             alpha, gamma, epsilon, epsilon_decay, epsilon_min,
             episodes, split_ratio, hidden_units, verbose, random_state, progress_interval,
             transaction_cost, min_holding_period, cooldown_period, prediction_horizon,
-            target_update_interval,
+            target_update_interval, replay_capacity, replay_batch_size,
+            replay_updates_per_episode,
         )
         self.algorithm_name = "DeepQLearning"
         self.score_column = "SignalStrength"
@@ -84,6 +89,11 @@ class DeepQLearningAgent(TradingAgent):
         self.cooldown_period = int(cooldown_period)
         self.prediction_horizon = int(prediction_horizon)
         self.target_update_interval = int(target_update_interval)
+        self.replay_capacity = int(replay_capacity)
+        self.replay_batch_size = int(replay_batch_size)
+        self.replay_updates_per_episode = (
+            None if replay_updates_per_episode is None else int(replay_updates_per_episode)
+        )
 
         if isinstance(features, str):
             raise ValueError("features must be a sequence of feature names, not a string.")
@@ -104,7 +114,8 @@ class DeepQLearningAgent(TradingAgent):
     def _validate_parameters(alpha, gamma, epsilon, epsilon_decay, epsilon_min,
                              episodes, split_ratio, hidden_units, verbose, random_state,
                              progress_interval, transaction_cost, min_holding_period,
-                             cooldown_period, prediction_horizon, target_update_interval):
+                             cooldown_period, prediction_horizon, target_update_interval,
+                             replay_capacity, replay_batch_size, replay_updates_per_episode):
         if alpha <= 0:
             raise ValueError("alpha must be positive.")
         if not 0 <= gamma < 1:
@@ -150,6 +161,17 @@ class DeepQLearningAgent(TradingAgent):
                 or not isinstance(target_update_interval, (int, np.integer))
                 or target_update_interval < 1):
             raise ValueError("target_update_interval must be a positive integer.")
+        for name, value in {
+            "replay_capacity": replay_capacity,
+            "replay_batch_size": replay_batch_size,
+        }.items():
+            if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or value < 1:
+                raise ValueError(f"{name} must be a positive integer.")
+        if (replay_updates_per_episode is not None
+                and (isinstance(replay_updates_per_episode, bool)
+                     or not isinstance(replay_updates_per_episode, (int, np.integer))
+                     or replay_updates_per_episode < 1)):
+            raise ValueError("replay_updates_per_episode must be None or a positive integer.")
 
     def _training_rng(self):
         tf.keras.utils.set_random_seed(self.random_state)
@@ -433,6 +455,44 @@ class DeepQLearningAgent(TradingAgent):
             "rewards": rewards,
         }
 
+    @staticmethod
+    def _append_rollout_to_replay(replay_buffer, rollout):
+        states = rollout["states"]
+        row_count = len(states)
+        for row in range(row_count):
+            terminal = row == row_count - 1
+            next_state = np.zeros_like(states[row]) if terminal else states[row + 1]
+            replay_buffer.append(
+                (
+                    states[row].copy(),
+                    int(rollout["actions"][row]),
+                    float(rollout["rewards"][row]),
+                    next_state.copy(),
+                    terminal,
+                )
+            )
+
+    def _train_replay_batch(self, model, target_model, replay_buffer, rng):
+        batch_size = min(self.replay_batch_size, len(replay_buffer))
+        sample_indices = rng.choice(len(replay_buffer), size=batch_size, replace=False)
+        samples = [replay_buffer[int(index)] for index in sample_indices]
+        states = np.stack([sample[0] for sample in samples])
+        actions = np.fromiter((sample[1] for sample in samples), dtype=int)
+        rewards = np.fromiter((sample[2] for sample in samples), dtype=float)
+        next_states = np.stack([sample[3] for sample in samples])
+        terminals = np.fromiter((sample[4] for sample in samples), dtype=bool)
+
+        online_predictor = self._model_predictor(model)
+        current_q_values = online_predictor(states)
+        next_actions = np.argmax(online_predictor(next_states), axis=1)
+        target_q_values = self._model_predictor(target_model)(next_states)
+        next_values = target_q_values[np.arange(batch_size), next_actions]
+        td_targets = rewards + self.gamma * (~terminals) * next_values
+
+        training_targets = current_q_values.copy()
+        training_targets[np.arange(batch_size), actions] = td_targets
+        return model.train_on_batch(states, training_targets)
+
     def train_model(self, stock):
         self._require_tensorflow()
         rng = self._training_rng()
@@ -466,10 +526,12 @@ class DeepQLearningAgent(TradingAgent):
         if not train_all_actions:
             target_model = self.build_model(input_dim=X_train_norm.shape[1] + 5)
             target_model.set_weights(model.get_weights())
+        replay_buffer = deque(maxlen=self.replay_capacity) if target_model is not None else None
         epsilon = 0.0 if train_all_actions else float(self.epsilon)
         reward_values = rewards_train.to_numpy(dtype=float)
         started = time.perf_counter()
         total_steps = 0
+        training_updates = 0
         if self.verbose:
             print(
                 f"[DQN] {stock}: {len(X_train_norm)} training rows, "
@@ -488,8 +550,6 @@ class DeepQLearningAgent(TradingAgent):
                 rng=None if train_all_actions else rng,
                 portfolio_returns=portfolio_returns_train.to_numpy(dtype=float),
             )
-            q_values = rollout["q_values"]
-            actions = rollout["actions"]
             realized_rewards = rollout["rewards"]
 
             if train_all_actions:
@@ -497,31 +557,29 @@ class DeepQLearningAgent(TradingAgent):
                     rollout["positions"],
                     reward_values,
                 )
+                model.train_on_batch(
+                    rollout["states"],
+                    training_targets,
+                )
+                training_updates += 1
             else:
-                targets = realized_rewards.copy()
-                if episode_steps > 1:
-                    next_actions = np.argmax(q_values[1:], axis=1)
-                    target_q_values = self._model_predictor(target_model)(
-                        rollout["states"][1:]
+                self._append_rollout_to_replay(replay_buffer, rollout)
+                replay_updates = self.replay_updates_per_episode
+                if replay_updates is None:
+                    replay_updates = max(
+                        1,
+                        int(np.ceil(episode_steps / self.replay_batch_size)),
                     )
-                    next_values = target_q_values[
-                        np.arange(episode_steps - 1),
-                        next_actions,
-                    ]
-                    targets[:-1] += self.gamma * next_values
-
-                training_targets = q_values.copy()
-                training_targets[
-                    np.arange(episode_steps),
-                    actions
-                ] = targets
-
-            model.train_on_batch(
-                rollout["states"],
-                training_targets,
-            )
-            if not train_all_actions and episode % self.target_update_interval == 0:
-                target_model.set_weights(model.get_weights())
+                for _ in range(replay_updates):
+                    self._train_replay_batch(
+                        model,
+                        target_model,
+                        replay_buffer,
+                        rng,
+                    )
+                    training_updates += 1
+                    if training_updates % self.target_update_interval == 0:
+                        target_model.set_weights(model.get_weights())
 
             episode_reward = float(realized_rewards.sum())
             total_steps += episode_steps
@@ -539,6 +597,8 @@ class DeepQLearningAgent(TradingAgent):
                 print(
                     f"[DQN] {stock}: episode {episode}/{self.episodes} | "
                     f"epsilon={epsilon:.4f} | avg_reward={average_reward:.6f} | "
+                    f"updates={training_updates} | "
+                    f"replay={len(replay_buffer) if replay_buffer is not None else 0} | "
                     f"elapsed={elapsed:.1f}s | {rate:.1f} steps/s",
                     flush=True,
                 )
@@ -576,7 +636,7 @@ class DeepQLearningAgent(TradingAgent):
             "Episodes": self.episodes,
             "EpsilonFinal": epsilon,
             "TrainingSeconds": training_seconds,
-            "TrainingUpdates": self.episodes,
+            "TrainingUpdates": training_updates,
             "TransactionCost": self.transaction_cost,
             "MinHoldingPeriod": self.min_holding_period,
             "CooldownPeriod": self.cooldown_period,
@@ -584,6 +644,9 @@ class DeepQLearningAgent(TradingAgent):
             "TrainingMode": "AllActionTargets" if train_all_actions else "DoubleDQN",
             "TargetUpdateInterval": self.target_update_interval if target_model is not None else None,
             "DoubleDQN": target_model is not None,
+            "ReplayCapacity": self.replay_capacity if replay_buffer is not None else None,
+            "ReplayBatchSize": self.replay_batch_size if replay_buffer is not None else None,
+            "ReplaySize": len(replay_buffer) if replay_buffer is not None else 0,
             "NetworkArchitecture": f"Dense({self.hidden_units}, swish) -> Dense(2, linear)",
             "Loss": "Huber(delta=0.02)",
         }

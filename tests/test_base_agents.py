@@ -915,6 +915,8 @@ class BaseAgentsTests(unittest.TestCase):
             {"min_holding_period": -1}, {"cooldown_period": 1.5},
             {"prediction_horizon": 0}, {"prediction_horizon": 1.5},
             {"target_update_interval": 0},
+            {"replay_capacity": 0}, {"replay_batch_size": 0},
+            {"replay_updates_per_episode": 0},
         )
 
         for options in invalid_options:
@@ -1131,10 +1133,17 @@ class BaseAgentsTests(unittest.TestCase):
         expected_long_targets[:-1] += 0.5 * 4.0
 
         np.testing.assert_allclose(online_model.targets[:, 0], 0.0)
-        np.testing.assert_allclose(online_model.targets[:, 1], expected_long_targets)
+        np.testing.assert_allclose(
+            np.sort(online_model.targets[:, 1]),
+            np.sort(expected_long_targets),
+        )
         self.assertEqual(target_model.set_weight_calls, 2)
         self.assertIs(agent.target_models["AAA"], target_model)
         self.assertEqual(agent.training_info["AAA"]["TrainingMode"], "DoubleDQN")
+        self.assertEqual(
+            agent.training_info["AAA"]["ReplaySize"],
+            len(agent.train_data["AAA"]["X_train"]),
+        )
 
     def test_deep_q_learning_rollout_enforces_holding_period_and_cooldown(self):
         data = make_market_data(periods=20)
