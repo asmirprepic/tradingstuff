@@ -1,4 +1,5 @@
 import unittest
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -80,6 +81,22 @@ class MovingAverageTopNStrategyTests(unittest.TestCase):
     def test_validates_top_n(self):
         with self.assertRaises(ValueError):
             MovingAverageTopNStrategy(make_strategy_data(), top_n=4, auto_generate=False)
+
+    def test_timezone_aware_data_preserves_timezone_without_period_warning(self):
+        data = make_strategy_data()
+        data.index = data.index.tz_localize("Europe/Stockholm")
+
+        with warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always")
+            strategy = MovingAverageTopNStrategy(
+                data, short_window=2, long_window=4, top_n=1
+            )
+
+        timezone_warnings = [
+            warning for warning in captured if "drop timezone" in str(warning.message)
+        ]
+        self.assertEqual(timezone_warnings, [])
+        self.assertEqual(strategy._rebalance_dates().tz, data.index.tz)
 
 
 def data_fields():

@@ -28,6 +28,7 @@ from agents.technical.nr7_agent import NR7BreakoutAgent
 from agents.technical.on_balance_volume_agent import OBVAgent
 from agents.technical.performance_agent import PerformanceBasedAgent
 from agents.technical.relative_strength_agent import RelativeStrengthAgent
+from agents.technical.residual_momentum_agent import ResidualMomentumAgent
 from agents.technical.price_volume_trend_agent import PVTAgent
 from agents.technical.rsi_agent import RSIAgent
 from agents.technical.supertrend_agent import SupertrendAgent
@@ -53,6 +54,7 @@ AGENT_ORDER = [
     "volume_price_divergence",
     "performance",
     "relative_strength",
+    "residual_momentum",
     "high_low",
     "nr7",
 ]
@@ -67,6 +69,7 @@ AGENT_FAMILIES = {
     "supertrend": "trend",
     "performance": "trend",
     "relative_strength": "trend",
+    "residual_momentum": "trend",
     "bollinger": "mean_reversion",
     "mean_reversion": "mean_reversion",
     "rsi": "mean_reversion",
@@ -236,6 +239,12 @@ def build_agent(agent_name, price_df):
             volatility_period=20,
             rebalance_period=20,
             top_n=max(1, min(20, stock_count)),
+        )
+    if agent_name == "residual_momentum":
+        return ResidualMomentumAgent(
+            price_df,
+            regression_window=126,
+            momentum_window=20,
         )
     if agent_name == "high_low":
         return HighLowAgent(price_df)
