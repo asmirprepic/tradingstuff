@@ -8,7 +8,8 @@ class BaseTopNStrategy(ABC):
     """Shared portfolio construction and evaluation for long-only top-N strategies."""
 
     def __init__(self, data, strategy_name, top_n=10, rebalance_frequency="W-FRI",
-                 price_type="Close", transaction_cost=0.0, evaluation_start=None):
+                 price_type="Close", transaction_cost=0.0, evaluation_start=None,
+                 performance_benchmark=None):
         self.strategy_name = strategy_name
         self.data = data
         self.top_n = int(top_n)
@@ -18,6 +19,8 @@ class BaseTopNStrategy(ABC):
         self.requested_evaluation_start = (
             None if evaluation_start is None else pd.Timestamp(evaluation_start)
         )
+        self.performance_benchmark = performance_benchmark
+        self.benchmark_name = "EqualWeightBuyHold"
         self._validate_inputs()
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
         if self.top_n > len(self.stocks_in_data):
@@ -122,11 +125,44 @@ class BaseTopNStrategy(ABC):
         self.portfolio_returns = gross_returns - turnover * self.transaction_cost
 
         benchmark_returns = pd.Series(0.0, index=close.index, dtype=float)
-        if self.evaluation_start is not None:
+        if self.evaluation_start is not None and self.performance_benchmark is None:
             evaluation_close = close.loc[self.evaluation_start:]
             start_prices = evaluation_close.iloc[0].replace(0.0, np.nan).dropna()
             benchmark_equity = evaluation_close[start_prices.index].div(start_prices).mean(axis=1)
             benchmark_returns.loc[benchmark_equity.index] = benchmark_equity.pct_change().fillna(0.0)
+        elif self.evaluation_start is not None:
+            benchmark = self.performance_benchmark
+            prices = benchmark if isinstance(benchmark, pd.Series) else getattr(benchmark, "prices", None)
+            if not isinstance(prices, pd.Series) or prices.empty:
+                raise ValueError(
+                    "performance_benchmark must be a non-empty price Series or an object "
+                    "with a non-empty prices Series."
+                )
+            self.benchmark_name = str(
+                getattr(benchmark, "name", None) or prices.name or "ExternalBenchmark"
+            )
+            external_prices = pd.to_numeric(prices, errors="coerce").copy()
+            external_index = pd.DatetimeIndex(external_prices.index)
+            if external_index.tz is not None:
+                external_index = external_index.tz_localize(None)
+            external_prices.index = external_index.normalize()
+            external_prices = external_prices.groupby(level=0).last().sort_index()
+
+            strategy_dates = close.index
+            normalized_dates = strategy_dates
+            if normalized_dates.tz is not None:
+                normalized_dates = normalized_dates.tz_localize(None)
+            normalized_dates = normalized_dates.normalize()
+            aligned_prices = external_prices.reindex(normalized_dates).ffill()
+            aligned_prices.index = strategy_dates
+            evaluation_prices = aligned_prices.loc[self.evaluation_start:]
+            if evaluation_prices.empty or pd.isna(evaluation_prices.iloc[0]):
+                raise ValueError(
+                    "performance_benchmark has no price on or before evaluation_start."
+                )
+            benchmark_returns.loc[evaluation_prices.index] = (
+                evaluation_prices.pct_change(fill_method=None).fillna(0.0)
+            )
         self.benchmark_returns = benchmark_returns
 
         if self.evaluation_start is not None:
@@ -177,7 +213,7 @@ class BaseTopNStrategy(ABC):
         benchmark = self._performance_metrics(self.benchmark_returns.loc[self.evaluation_start:])
         result = pd.DataFrame([
             {"Portfolio": self.strategy_name, **strategy},
-            {"Portfolio": "EqualWeightBuyHold", **benchmark},
+            {"Portfolio": self.benchmark_name, **benchmark},
         ])
         result["Outperformance_%"] = result["Total_Return_%"] - benchmark["Total_Return_%"]
         return result.round(4)

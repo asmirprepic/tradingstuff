@@ -34,6 +34,7 @@ from agents.technical.rsi_agent import RSIAgent
 from agents.technical.supertrend_agent import SupertrendAgent
 from agents.technical.volume_price_divergence_agent import VolumePriceDivergenceAgent
 from agents.technical.volume_weighted_average_price_agent import VWAPAgent
+from agents.technical.volatility_adjusted_breakout_agent import VolatilityAdjustedBreakoutAgent
 from agents.utils.evaluate import evaluations_from_agent
 
 
@@ -55,6 +56,7 @@ AGENT_ORDER = [
     "performance",
     "relative_strength",
     "residual_momentum",
+    "volatility_adjusted_breakout",
     "high_low",
     "nr7",
 ]
@@ -79,6 +81,7 @@ AGENT_FAMILIES = {
     "volume_price_divergence": "volume_confirmation",
     "high_low": "breakout",
     "nr7": "breakout",
+    "volatility_adjusted_breakout": "breakout",
 }
 
 
@@ -245,6 +248,12 @@ def build_agent(agent_name, price_df):
             price_df,
             regression_window=126,
             momentum_window=20,
+        )
+    if agent_name == "volatility_adjusted_breakout":
+        return VolatilityAdjustedBreakoutAgent(
+            price_df,
+            breakout_window=60,
+            atr_window=20,
         )
     if agent_name == "high_low":
         return HighLowAgent(price_df)

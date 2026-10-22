@@ -9,7 +9,8 @@ class MovingAverageTopNStrategy(BaseTopNStrategy):
 
     def __init__(self, data, short_window=50, long_window=200, top_n=10,
                  rebalance_frequency="W-FRI", price_type="Close",
-                 transaction_cost=0.0, auto_generate=True, evaluation_start=None):
+                 transaction_cost=0.0, auto_generate=True, evaluation_start=None,
+                 performance_benchmark=None):
         self.short_window = int(short_window)
         self.long_window = int(long_window)
         if self.short_window < 1 or self.long_window < 1:
@@ -17,7 +18,8 @@ class MovingAverageTopNStrategy(BaseTopNStrategy):
         if self.short_window >= self.long_window:
             raise ValueError("short_window must be smaller than long_window.")
         super().__init__(data, "MovingAverageTopN", top_n, rebalance_frequency,
-                         price_type, transaction_cost, evaluation_start)
+                         price_type, transaction_cost, evaluation_start,
+                         performance_benchmark)
         if auto_generate:
             self.run_all()
 
