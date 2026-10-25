@@ -98,6 +98,16 @@ class MovingAverageTopNStrategyTests(unittest.TestCase):
         self.assertEqual(timezone_warnings, [])
         self.assertEqual(strategy._rebalance_dates().tz, data.index.tz)
 
+    def test_incomplete_final_week_is_not_a_rebalance_date(self):
+        data = make_strategy_data(periods=16)
+        strategy = MovingAverageTopNStrategy(
+            data, short_window=2, long_window=4, top_n=1
+        )
+
+        self.assertEqual(data.index[-1].weekday(), 0)
+        self.assertNotIn(data.index[-1], strategy._rebalance_dates())
+        self.assertEqual(strategy._rebalance_dates()[-1].weekday(), 4)
+
 
 def data_fields():
     return ["Open", "High", "Low", "Close", "Volume"]

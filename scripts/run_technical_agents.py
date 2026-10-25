@@ -19,6 +19,7 @@ from agents.technical.bollinger_bands_agent import BollingerBandsAgent
 from agents.technical.adx_dmi_agent import ADXDMIAgent
 from agents.technical.change_point_agent import ChangePointAgent
 from agents.technical.high_low import HighLowAgent
+from agents.technical.graph_relative_return_agent import GraphRelativeReturnAgent
 from agents.technical.macd_agent import MACDAgent
 from agents.technical.mean_reversion_agent import MeanReversionAgent
 from agents.technical.momentum_agent import MomentumAgent
@@ -40,6 +41,7 @@ from agents.utils.evaluate import evaluations_from_agent
 
 AGENT_ORDER = [
     "momentum",
+    "graph_relative_return",
     "moving_average",
     "moving_average_crossover",
     "macd",
@@ -63,6 +65,7 @@ AGENT_ORDER = [
 
 AGENT_FAMILIES = {
     "momentum": "trend",
+    "graph_relative_return": "cross_sectional",
     "moving_average": "trend",
     "moving_average_crossover": "trend",
     "macd": "trend",
@@ -201,6 +204,12 @@ def build_agent(agent_name, price_df):
 
     if agent_name == "momentum":
         return MomentumAgent(price_df, lookbacks=[20, 60], score_mode="z")
+    if agent_name == "graph_relative_return":
+        return GraphRelativeReturnAgent(
+            price_df,
+            graph_window=126,
+            top_k=max(1, min(8, stock_count - 1)),
+        )
     if agent_name == "moving_average":
         return MovingAverageAgent(price_df, short_window=50, long_window=200)
     if agent_name == "moving_average_crossover":

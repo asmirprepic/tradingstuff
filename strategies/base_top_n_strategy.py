@@ -60,7 +60,10 @@ class BaseTopNStrategy(ABC):
 
     def _rebalance_dates(self):
         indexed_dates = pd.Series(self.data.index, index=self.data.index)
-        dates = indexed_dates.resample(self.rebalance_frequency).last().dropna()
+        grouped = indexed_dates.resample(self.rebalance_frequency).last().dropna()
+        # Resample also creates a bucket for an unfinished final week/month.
+        completed = grouped.index <= self.data.index[-1]
+        dates = grouped.loc[completed]
         return pd.DatetimeIndex(dates.tolist())
 
     def _resolve_evaluation_start(self, natural_start):
