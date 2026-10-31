@@ -20,6 +20,7 @@ class GraphRelativeReturnAgent(TradingAgent):
         calibration_weeks=52,
         minimum_calibration_weeks=12,
         direction_shrinkage=0.10,
+        shock_threshold=0.08,
         decision_frequency="W-FRI",
         remove_market_mode=True,
         price_type="Close",
@@ -36,6 +37,7 @@ class GraphRelativeReturnAgent(TradingAgent):
         self.calibration_weeks = int(calibration_weeks)
         self.minimum_calibration_weeks = int(minimum_calibration_weeks)
         self.direction_shrinkage = float(direction_shrinkage)
+        self.shock_threshold = float(shock_threshold)
         self.decision_frequency = decision_frequency
         self.remove_market_mode = bool(remove_market_mode)
         self.price_type = price_type
@@ -69,6 +71,8 @@ class GraphRelativeReturnAgent(TradingAgent):
             raise ValueError("minimum_correlation must be between 0 and 1.")
         if self.direction_shrinkage < 0.0:
             raise ValueError("direction_shrinkage cannot be negative.")
+        if not 0.0 < self.shock_threshold < 1.0:
+            raise ValueError("shock_threshold must be between 0 and 1.")
         try:
             pd.tseries.frequencies.to_offset(self.decision_frequency)
         except (TypeError, ValueError) as exc:
@@ -104,6 +108,11 @@ class GraphRelativeReturnAgent(TradingAgent):
     def _generate_all_signals(self):
         close = self.data.xs(self.price_type, level=1, axis=1).astype(float)
         daily_returns = np.log(close / close.shift(1))
+        simple_returns = close.pct_change(fill_method=None)
+        maximum_daily_move = simple_returns.abs().rolling(
+            self.recent_return_window,
+            min_periods=self.recent_return_window,
+        ).max()
         index = close.index
         stocks = close.columns
         decision_dates = set(self._decision_dates())
@@ -212,10 +221,18 @@ class GraphRelativeReturnAgent(TradingAgent):
             signals["DirectionMode"] = mode_series
             signals["GraphScore"] = score_matrix[stock]
             signals["SignalStrength"] = score_matrix[stock]
+            signals["MaximumDailyMove"] = maximum_daily_move[stock]
+            signals["ShockExcluded"] = signals["MaximumDailyMove"].ge(
+                self.shock_threshold
+            )
             signals["NeighbourCount"] = neighbour_count_matrix[stock]
             signals["Valid"] = signals["GraphScore"].notna()
             signals["Position"] = np.where(
-                signals["Valid"] & signals["GraphScore"].gt(0.0), 1, 0
+                signals["Valid"]
+                & ~signals["ShockExcluded"]
+                & signals["GraphScore"].gt(0.0),
+                1,
+                0,
             ).astype(int)
             signals["Signal"] = np.sign(signals["Position"].diff().fillna(0)).astype(int)
             self.signal_data[stock] = signals

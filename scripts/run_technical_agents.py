@@ -18,8 +18,12 @@ from data_handling.get_stock_tickers import GetTickers
 from agents.technical.bollinger_bands_agent import BollingerBandsAgent
 from agents.technical.adx_dmi_agent import ADXDMIAgent
 from agents.technical.change_point_agent import ChangePointAgent
+from agents.technical.eigenportfolio_rotation_agent import EigenportfolioRotationAgent
+from agents.technical.cross_sectional_entropy_agent import CrossSectionalEntropyAgent
+from agents.technical.dynamic_lead_lag_agent import DynamicLeadLagAgent
 from agents.technical.high_low import HighLowAgent
 from agents.technical.graph_relative_return_agent import GraphRelativeReturnAgent
+from agents.technical.graph_shock_propagation_agent import GraphShockPropagationAgent
 from agents.technical.macd_agent import MACDAgent
 from agents.technical.mean_reversion_agent import MeanReversionAgent
 from agents.technical.momentum_agent import MomentumAgent
@@ -41,7 +45,11 @@ from agents.utils.evaluate import evaluations_from_agent
 
 AGENT_ORDER = [
     "momentum",
+    "eigenportfolio_rotation",
+    "cross_sectional_entropy",
+    "dynamic_lead_lag",
     "graph_relative_return",
+    "graph_shock_propagation",
     "moving_average",
     "moving_average_crossover",
     "macd",
@@ -65,7 +73,11 @@ AGENT_ORDER = [
 
 AGENT_FAMILIES = {
     "momentum": "trend",
+    "eigenportfolio_rotation": "cross_sectional",
+    "cross_sectional_entropy": "cross_sectional",
+    "dynamic_lead_lag": "network_propagation",
     "graph_relative_return": "cross_sectional",
+    "graph_shock_propagation": "network_propagation",
     "moving_average": "trend",
     "moving_average_crossover": "trend",
     "macd": "trend",
@@ -204,12 +216,30 @@ def build_agent(agent_name, price_df):
 
     if agent_name == "momentum":
         return MomentumAgent(price_df, lookbacks=[20, 60], score_mode="z")
+    if agent_name == "eigenportfolio_rotation":
+        return EigenportfolioRotationAgent(
+            price_df,
+            component_count=min(8, stock_count),
+        )
+    if agent_name == "cross_sectional_entropy":
+        return CrossSectionalEntropyAgent(
+            price_df,
+            minimum_stocks=max(2, min(10, stock_count)),
+            maximum_leaders=max(1, min(10, stock_count)),
+        )
+    if agent_name == "dynamic_lead_lag":
+        return DynamicLeadLagAgent(
+            price_df,
+            maximum_leaders_per_target=max(1, min(15, stock_count - 1)),
+        )
     if agent_name == "graph_relative_return":
         return GraphRelativeReturnAgent(
             price_df,
             graph_window=126,
             top_k=max(1, min(8, stock_count - 1)),
         )
+    if agent_name == "graph_shock_propagation":
+        return GraphShockPropagationAgent(price_df)
     if agent_name == "moving_average":
         return MovingAverageAgent(price_df, short_window=50, long_window=200)
     if agent_name == "moving_average_crossover":

@@ -127,6 +127,12 @@ class BaseTopNStrategy(ABC):
         turnover = self.effective_weights.diff().abs().sum(axis=1).fillna(0.0)
         self.portfolio_returns = gross_returns - turnover * self.transaction_cost
 
+        self._finalize_return_outputs(close, turnover)
+        return self.portfolio_returns
+
+    def _finalize_return_outputs(self, close, turnover):
+        """Build benchmark, equity curves, and the common strategy log."""
+
         benchmark_returns = pd.Series(0.0, index=close.index, dtype=float)
         if self.evaluation_start is not None and self.performance_benchmark is None:
             evaluation_close = close.loc[self.evaluation_start:]
@@ -187,7 +193,6 @@ class BaseTopNStrategy(ABC):
             "Equity": self.equity_curve,
             "BenchmarkEquity": self.benchmark_equity_curve,
         }, index=self.data.index)
-        return self.portfolio_returns
 
     @staticmethod
     def _performance_metrics(returns):

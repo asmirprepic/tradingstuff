@@ -136,6 +136,23 @@ class GraphRelativeReturnAgentTests(unittest.TestCase):
         self.assertNotIn(data.index[-1], agent._decision_dates())
         self.assertEqual(agent._decision_dates()[-1].weekday(), 4)
 
+    def test_excludes_recent_large_daily_move(self):
+        data = make_graph_data()
+        decision_date = data.index[-1]
+        self.assertEqual(decision_date.weekday(), 4)
+        data.loc[decision_date, ("S0", "Close")] *= 0.80
+
+        agent = self.build_agent(data)
+        signal = agent.signal_data["S0"].loc[decision_date]
+
+        self.assertGreater(signal["MaximumDailyMove"], 0.08)
+        self.assertTrue(signal["ShockExcluded"])
+        self.assertEqual(signal["Position"], 0)
+
+    def test_rejects_invalid_shock_threshold(self):
+        with self.assertRaises(ValueError):
+            GraphRelativeReturnAgent(make_graph_data(), shock_threshold=0.0)
+
 
 class GraphDeviationTopNStrategyTests(unittest.TestCase):
     def test_creates_weekly_next_bar_portfolio(self):
@@ -168,6 +185,28 @@ class GraphDeviationTopNStrategyTests(unittest.TestCase):
                 graph_window=30,
                 top_k=3,
             )
+
+    def test_shocked_stock_is_not_selected(self):
+        data = make_graph_data()
+        decision_date = data.index[-1]
+        data.loc[decision_date, ("S0", "Close")] *= 0.80
+        strategy = GraphDeviationTopNStrategy(
+            data,
+            graph_window=30,
+            top_k=2,
+            minimum_correlation=0.05,
+            recent_return_window=5,
+            prediction_horizon=5,
+            calibration_weeks=8,
+            minimum_calibration_weeks=3,
+            shock_threshold=0.08,
+            top_n=2,
+        )
+
+        self.assertEqual(strategy.target_weights.loc[decision_date, "S0"], 0.0)
+        self.assertTrue(
+            strategy.agent.signal_data["S0"].loc[decision_date, "ShockExcluded"]
+        )
 
     def test_plotting_interfaces_return_matplotlib_objects(self):
         strategy = GraphDeviationTopNStrategy(
