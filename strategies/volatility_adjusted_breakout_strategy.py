@@ -13,7 +13,8 @@ class VolatilityAdjustedBreakoutStrategy(BaseTopNStrategy):
     def __init__(self, data, breakout_window=60, atr_window=20,
                  stop_atr_multiple=3.0, top_n=10, rebalance_frequency="B",
                  price_type="Close", transaction_cost=0.0, auto_generate=True,
-                 evaluation_start=None, performance_benchmark=None):
+                 evaluation_start=None, performance_benchmark=None,
+                 execution_mode="next_open"):
         self.breakout_window = int(breakout_window)
         self.atr_window = int(atr_window)
         self.stop_atr_multiple = float(stop_atr_multiple)
@@ -32,6 +33,7 @@ class VolatilityAdjustedBreakoutStrategy(BaseTopNStrategy):
             transaction_cost,
             evaluation_start,
             performance_benchmark,
+            execution_mode,
         )
         self.entry_matrix = pd.DataFrame()
         self.exit_matrix = pd.DataFrame()
@@ -118,6 +120,7 @@ class VolatilityAdjustedBreakoutStrategy(BaseTopNStrategy):
         self.target_weights = weights
         self.effective_weights = self.target_weights.shift(1).fillna(0.0)
         valid_dates = sorted(decision_dates)
+        self.weight_rebalance_dates = pd.DatetimeIndex(valid_dates)
         natural_start = None
         if valid_dates:
             first_position = index.get_loc(valid_dates[0]) + 1

@@ -78,6 +78,7 @@ class IndexBenchmarkTests(unittest.TestCase):
             top_n=1,
             evaluation_start=data.index[6],
             performance_benchmark=benchmark,
+            execution_mode="next_close",
         )
 
         result = strategy.evaluate_performance()
@@ -104,6 +105,7 @@ class IndexBenchmarkTests(unittest.TestCase):
                 top_n=1,
                 evaluation_start=data.index[6],
                 performance_benchmark=IndexBenchmark(),
+                execution_mode="next_close",
             )
 
 

@@ -10,7 +10,8 @@ class ResidualMomentumTopNStrategy(BaseTopNStrategy):
     def __init__(self, data, regression_window=126, momentum_window=20,
                  benchmark_returns=None, top_n=10, rebalance_frequency="W-FRI",
                  price_type="Close", transaction_cost=0.0, auto_generate=True,
-                 evaluation_start=None, performance_benchmark=None):
+                 evaluation_start=None, performance_benchmark=None,
+                 execution_mode="next_open"):
         self.regression_window = int(regression_window)
         self.momentum_window = int(momentum_window)
         self.factor_benchmark_returns = benchmark_returns
@@ -20,7 +21,7 @@ class ResidualMomentumTopNStrategy(BaseTopNStrategy):
             raise ValueError("momentum_window must be a positive integer.")
         super().__init__(data, "ResidualMomentumTopN", top_n, rebalance_frequency,
                          price_type, transaction_cost, evaluation_start,
-                         performance_benchmark)
+                          performance_benchmark, execution_mode)
         if auto_generate:
             self.run_all()
 

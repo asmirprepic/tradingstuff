@@ -24,6 +24,7 @@ class MovingAverageTopNStrategy(BaseTopNStrategy):
         long_slope_window=20,
         downside_shock_threshold=None,
         shock_lookback=5,
+        execution_mode="next_open",
     ):
         self.short_window = int(short_window)
         self.long_window = int(long_window)
@@ -58,6 +59,7 @@ class MovingAverageTopNStrategy(BaseTopNStrategy):
             transaction_cost,
             evaluation_start,
             performance_benchmark,
+            execution_mode,
         )
         if auto_generate:
             self.run_all()

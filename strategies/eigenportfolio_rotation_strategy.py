@@ -23,6 +23,7 @@ class EigenportfolioRotationStrategy(BaseWeightedStrategy):
         auto_generate=True,
         evaluation_start=None,
         performance_benchmark=None,
+        execution_mode="next_open",
     ):
         self.agent_parameters = {
             "estimation_window": estimation_window,
@@ -45,6 +46,7 @@ class EigenportfolioRotationStrategy(BaseWeightedStrategy):
             transaction_cost,
             evaluation_start,
             performance_benchmark,
+            execution_mode,
         )
         if auto_generate:
             self.run_all()

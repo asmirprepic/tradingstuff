@@ -27,6 +27,7 @@ class DynamicLeadLagTopNStrategy(BaseTopNStrategy):
         auto_generate=True,
         evaluation_start=None,
         performance_benchmark=None,
+        execution_mode="next_open",
     ):
         self.agent_parameters = {
             "estimation_window": estimation_window,
@@ -51,6 +52,7 @@ class DynamicLeadLagTopNStrategy(BaseTopNStrategy):
             transaction_cost,
             evaluation_start,
             performance_benchmark,
+            execution_mode,
         )
         if auto_generate:
             self.run_all()

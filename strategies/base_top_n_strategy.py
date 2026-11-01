@@ -9,7 +9,7 @@ class BaseTopNStrategy(ABC):
 
     def __init__(self, data, strategy_name, top_n=10, rebalance_frequency="W-FRI",
                  price_type="Close", transaction_cost=0.0, evaluation_start=None,
-                 performance_benchmark=None):
+                 performance_benchmark=None, execution_mode="next_open"):
         self.strategy_name = strategy_name
         self.data = data
         self.top_n = int(top_n)
@@ -20,6 +20,7 @@ class BaseTopNStrategy(ABC):
             None if evaluation_start is None else pd.Timestamp(evaluation_start)
         )
         self.performance_benchmark = performance_benchmark
+        self.execution_mode = str(execution_mode).lower().strip()
         self.benchmark_name = "EqualWeightBuyHold"
         self._validate_inputs()
         self.stocks_in_data = self.data.columns.get_level_values(0).unique()
@@ -37,6 +38,13 @@ class BaseTopNStrategy(ABC):
         self.benchmark_returns = pd.Series(dtype=float)
         self.benchmark_equity_curve = pd.Series(dtype=float)
         self.evaluation_start = None
+        self.weight_rebalance_dates = pd.DatetimeIndex([])
+        self.overnight_weights = pd.DataFrame()
+        self.intraday_weights = pd.DataFrame()
+        self.overnight_returns = pd.Series(dtype=float)
+        self.intraday_returns = pd.Series(dtype=float)
+        self.gross_portfolio_returns = pd.Series(dtype=float)
+        self.execution_flags = pd.Series(dtype=bool)
 
     def _validate_inputs(self):
         if not isinstance(self.data, pd.DataFrame) or self.data.empty:
@@ -51,6 +59,13 @@ class BaseTopNStrategy(ABC):
             raise ValueError("top_n must be a positive integer.")
         if self.transaction_cost < 0:
             raise ValueError("transaction_cost cannot be negative.")
+        if self.execution_mode not in {
+            "next_open", "next_close", "legacy_same_close"
+        }:
+            raise ValueError(
+                "execution_mode must be 'next_open', 'next_close', "
+                "or 'legacy_same_close'."
+            )
         if self.price_type not in self.data.columns.get_level_values(1):
             raise ValueError(f"Price field {self.price_type!r} was not found in data.")
         try:
@@ -106,6 +121,7 @@ class BaseTopNStrategy(ABC):
 
         self.target_weights = weights.ffill().fillna(0.0)
         self.effective_weights = self.target_weights.shift(1).fillna(0.0)
+        self.weight_rebalance_dates = pd.DatetimeIndex(valid_dates)
         natural_start = None
         if valid_dates:
             first_position = index.get_loc(valid_dates[0]) + 1
@@ -122,11 +138,174 @@ class BaseTopNStrategy(ABC):
         if self.target_weights.empty:
             raise RuntimeError("Generate target weights before calculating returns.")
         close = self.data.xs(self.price_type, level=1, axis=1).astype(float)
+        if self.execution_mode != "legacy_same_close":
+            return self._calculate_realistic_returns(close)
+
         daily_returns = close.pct_change(fill_method=None)
         gross_returns = (daily_returns * self.effective_weights).sum(axis=1, min_count=1).fillna(0.0)
         turnover = self.effective_weights.diff().abs().sum(axis=1).fillna(0.0)
         self.portfolio_returns = gross_returns - turnover * self.transaction_cost
+        self.overnight_weights = pd.DataFrame(
+            0.0, index=close.index, columns=close.columns
+        )
+        self.intraday_weights = self.effective_weights.copy()
+        self.overnight_returns = pd.Series(0.0, index=close.index)
+        self.intraday_returns = gross_returns.copy()
+        self.gross_portfolio_returns = gross_returns.copy()
+        self.execution_flags = turnover.gt(0.0)
 
+        self._finalize_return_outputs(close, turnover)
+        return self.portfolio_returns
+
+    def _execution_schedule(self, index):
+        schedule = {}
+        for decision_date in self.weight_rebalance_dates:
+            if decision_date not in index:
+                continue
+            execution_position = index.get_loc(decision_date) + 1
+            if execution_position < len(index):
+                schedule[index[execution_position]] = decision_date
+        return schedule
+
+    @staticmethod
+    def _drift_weights(weights, stock_returns, portfolio_return):
+        denominator = 1.0 + portfolio_return
+        if denominator <= 0.0:
+            return pd.Series(0.0, index=weights.index, dtype=float)
+        return (weights * (1.0 + stock_returns) / denominator).clip(lower=0.0)
+
+    @staticmethod
+    def _validate_required_returns(stock_returns, weights, date, segment):
+        required = weights[weights.gt(1e-15)].index
+        if required.empty:
+            return
+        invalid = stock_returns.reindex(required).loc[
+            lambda values: ~np.isfinite(values)
+        ]
+        if not invalid.empty:
+            stocks = ", ".join(map(str, invalid.index[:5]))
+            raise ValueError(
+                f"Missing or invalid {segment} prices on {date} for held stocks: "
+                f"{stocks}."
+            )
+
+    def _calculate_realistic_returns(self, close):
+        if self.execution_mode == "next_open":
+            if "Open" not in self.data.columns.get_level_values(1):
+                raise ValueError("execution_mode='next_open' requires Open prices.")
+            open_prices = self.data.xs("Open", level=1, axis=1).astype(float)
+            missing = close.columns.difference(open_prices.columns)
+            if len(missing):
+                raise ValueError(
+                    "execution_mode='next_open' requires Open prices for every stock."
+                )
+            open_prices = open_prices.reindex(columns=close.columns)
+            overnight_stock_returns = open_prices.div(close.shift(1)).sub(1.0)
+            intraday_stock_returns = close.div(open_prices).sub(1.0)
+        else:
+            close_returns = close.pct_change(fill_method=None)
+
+        effective = pd.DataFrame(0.0, index=close.index, columns=close.columns)
+        overnight_weights = effective.copy()
+        intraday_weights = effective.copy()
+        overnight_returns = pd.Series(0.0, index=close.index, dtype=float)
+        intraday_returns = pd.Series(0.0, index=close.index, dtype=float)
+        gross_returns = pd.Series(0.0, index=close.index, dtype=float)
+        net_returns = pd.Series(0.0, index=close.index, dtype=float)
+        turnover = pd.Series(0.0, index=close.index, dtype=float)
+        executions = pd.Series(False, index=close.index, dtype=bool)
+        schedule = self._execution_schedule(close.index)
+        end_weights = pd.Series(0.0, index=close.columns, dtype=float)
+
+        for date in close.index:
+            decision_date = schedule.get(date)
+            if self.execution_mode == "next_open":
+                overnight_weights.loc[date] = end_weights
+                overnight_stock = overnight_stock_returns.loc[date]
+                self._validate_required_returns(
+                    overnight_stock, end_weights, date, "close-to-open"
+                )
+                overnight_return = float(
+                    (end_weights * overnight_stock.fillna(0.0)).sum()
+                )
+                pretrade_weights = self._drift_weights(
+                    end_weights,
+                    overnight_stock.fillna(0.0),
+                    overnight_return,
+                )
+                active_weights = pretrade_weights
+                if decision_date is not None:
+                    active_weights = self.target_weights.loc[decision_date].fillna(0.0)
+                    turnover.loc[date] = (active_weights - pretrade_weights).abs().sum()
+                    executions.loc[date] = True
+                intraday_stock = intraday_stock_returns.loc[date]
+                self._validate_required_returns(
+                    intraday_stock, active_weights, date, "open-to-close"
+                )
+                intraday_return = float(
+                    (active_weights * intraday_stock.fillna(0.0)).sum()
+                )
+                overnight_returns.loc[date] = overnight_return
+                intraday_returns.loc[date] = intraday_return
+                overnight_weights.loc[date] = end_weights
+                intraday_weights.loc[date] = active_weights
+                effective.loc[date] = active_weights
+                gross_returns.loc[date] = (
+                    (1.0 + overnight_return) * (1.0 + intraday_return) - 1.0
+                )
+                cost_rate = turnover.loc[date] * self.transaction_cost
+                if cost_rate >= 1.0:
+                    raise ValueError("Transaction costs consume the entire portfolio.")
+                net_returns.loc[date] = (
+                    (1.0 + overnight_return)
+                    * (1.0 - cost_rate)
+                    * (1.0 + intraday_return)
+                    - 1.0
+                )
+                end_weights = self._drift_weights(
+                    active_weights,
+                    intraday_stock.fillna(0.0),
+                    intraday_return,
+                )
+            else:
+                active_weights = end_weights.copy()
+                effective.loc[date] = active_weights
+                overnight_weights.loc[date] = active_weights
+                close_stock = close_returns.loc[date]
+                self._validate_required_returns(
+                    close_stock, active_weights, date, "close-to-close"
+                )
+                gross_return = float(
+                    (active_weights * close_stock.fillna(0.0)).sum()
+                )
+                pretrade_weights = self._drift_weights(
+                    active_weights,
+                    close_stock.fillna(0.0),
+                    gross_return,
+                )
+                end_weights = pretrade_weights
+                if decision_date is not None:
+                    target = self.target_weights.loc[decision_date].fillna(0.0)
+                    turnover.loc[date] = (target - pretrade_weights).abs().sum()
+                    end_weights = target
+                    executions.loc[date] = True
+                gross_returns.loc[date] = gross_return
+                overnight_returns.loc[date] = gross_return
+                cost_rate = turnover.loc[date] * self.transaction_cost
+                if cost_rate >= 1.0:
+                    raise ValueError("Transaction costs consume the entire portfolio.")
+                net_returns.loc[date] = (
+                    (1.0 + gross_return) * (1.0 - cost_rate) - 1.0
+                )
+
+        self.effective_weights = effective
+        self.overnight_weights = overnight_weights
+        self.intraday_weights = intraday_weights
+        self.overnight_returns = overnight_returns
+        self.intraday_returns = intraday_returns
+        self.gross_portfolio_returns = gross_returns
+        self.execution_flags = executions
+        self.portfolio_returns = net_returns
         self._finalize_return_outputs(close, turnover)
         return self.portfolio_returns
 
@@ -189,6 +368,11 @@ class BaseTopNStrategy(ABC):
             "N_Held": self.target_weights.gt(0.0).sum(axis=1).astype(int),
             "Rebalance": [date in rebalance_set for date in self.data.index],
             "Turnover": turnover,
+            "Execution": self.execution_flags.reindex(close.index).fillna(False),
+            "ExecutionMode": self.execution_mode,
+            "OvernightReturn": self.overnight_returns.reindex(close.index).fillna(0.0),
+            "IntradayReturn": self.intraday_returns.reindex(close.index).fillna(0.0),
+            "GrossPortfolioReturn": self.gross_portfolio_returns.reindex(close.index).fillna(0.0),
             "PortfolioReturn": self.portfolio_returns,
             "Equity": self.equity_curve,
             "BenchmarkEquity": self.benchmark_equity_curve,

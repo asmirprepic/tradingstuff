@@ -31,6 +31,7 @@ class EntropyLeaderContinuationStrategy(BaseWeightedStrategy):
         auto_generate=True,
         evaluation_start=None,
         performance_benchmark=None,
+        execution_mode="next_open",
     ):
         self.maximum_stock_weight = float(maximum_stock_weight)
         if not 0.0 < self.maximum_stock_weight <= 1.0:
@@ -58,6 +59,7 @@ class EntropyLeaderContinuationStrategy(BaseWeightedStrategy):
             transaction_cost,
             evaluation_start,
             performance_benchmark,
+            execution_mode,
         )
         if auto_generate:
             self.run_all()

@@ -16,6 +16,7 @@ class BaseWeightedStrategy(BaseTopNStrategy):
         transaction_cost=0.0,
         evaluation_start=None,
         performance_benchmark=None,
+        execution_mode="next_open",
     ):
         if not isinstance(data, pd.DataFrame) or not isinstance(data.columns, pd.MultiIndex):
             stock_count = 1
@@ -30,6 +31,7 @@ class BaseWeightedStrategy(BaseTopNStrategy):
             transaction_cost=transaction_cost,
             evaluation_start=evaluation_start,
             performance_benchmark=performance_benchmark,
+            execution_mode=execution_mode,
         )
 
     def _finalize_weight_targets(self, rebalance_weights, valid_dates):
@@ -66,6 +68,9 @@ class BaseWeightedStrategy(BaseTopNStrategy):
         if self.target_weights.empty:
             raise RuntimeError("Generate target weights before calculating returns.")
         close = self.data.xs(self.price_type, level=1, axis=1).astype(float)
+        if self.execution_mode != "legacy_same_close":
+            return self._calculate_realistic_returns(close)
+
         daily_returns = close.pct_change(fill_method=None).fillna(0.0)
         effective = pd.DataFrame(0.0, index=close.index, columns=close.columns)
         portfolio_returns = pd.Series(0.0, index=close.index, dtype=float)
@@ -100,5 +105,13 @@ class BaseWeightedStrategy(BaseTopNStrategy):
 
         self.effective_weights = effective
         self.portfolio_returns = portfolio_returns
+        self.overnight_weights = pd.DataFrame(
+            0.0, index=close.index, columns=close.columns
+        )
+        self.intraday_weights = effective.copy()
+        self.overnight_returns = pd.Series(0.0, index=close.index)
+        self.intraday_returns = portfolio_returns + turnover * self.transaction_cost
+        self.gross_portfolio_returns = self.intraday_returns.copy()
+        self.execution_flags = turnover.gt(0.0)
         self._finalize_return_outputs(close, turnover)
         return self.portfolio_returns
