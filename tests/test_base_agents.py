@@ -882,6 +882,24 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertTrue(x_train.index.equals(pd.Index(index_train)))
         self.assertTrue(x_test.index.equals(pd.Index(index_test)))
 
+    def test_deep_q_learning_supports_multiday_targets_and_purges_horizon(self):
+        data = make_market_data(periods=60)
+        agent = DeepQLearningAgent(data, prediction_horizon=3)
+        features, rewards = agent.feature_engineering("AAA")
+        close = data[("AAA", "Close")]
+        expected = np.log(close.shift(-3) / close).reindex(rewards.index)
+
+        np.testing.assert_allclose(rewards, expected)
+
+        x_train, x_test, _, _, _, _ = agent.create_train_split_group(
+            features,
+            rewards,
+            features.index,
+            split_ratio=agent.split_ratio,
+        )
+        boundary = features.index.get_loc(x_test.index[0])
+        self.assertEqual(x_train.index[-1], features.index[boundary - 4])
+
     def test_deep_q_learning_validates_configuration(self):
         data = make_market_data(periods=20)
         invalid_options = (
@@ -894,6 +912,11 @@ class BaseAgentsTests(unittest.TestCase):
             {"features": ["Return_1D", "Return_1D"]},
             {"features": ["UnknownFeature"]},
             {"transaction_cost": -0.001},
+            {"min_holding_period": -1}, {"cooldown_period": 1.5},
+            {"prediction_horizon": 0}, {"prediction_horizon": 1.5},
+            {"target_update_interval": 0},
+            {"replay_capacity": 0}, {"replay_batch_size": 0},
+            {"replay_updates_per_episode": 0},
         )
 
         for options in invalid_options:
@@ -922,6 +945,92 @@ class BaseAgentsTests(unittest.TestCase):
         np.testing.assert_array_equal(first_rng.integers(100, size=10), second_rng.integers(100, size=10))
         self.assertEqual(tf_mock.keras.utils.set_random_seed.call_count, 2)
         tf_mock.keras.utils.set_random_seed.assert_called_with(17)
+
+    def test_deep_q_learning_compact_predictor_matches_swish_network(self):
+        class CompactModel:
+            @staticmethod
+            def get_weights():
+                return [
+                    np.eye(2),
+                    np.zeros(2),
+                    np.array([[1.0, 2.0], [3.0, 4.0]]),
+                    np.array([0.5, -0.5]),
+                ]
+
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(data)
+        features = np.array([[-1.0, 2.0], [0.5, -0.5]])
+        hidden = features / (1.0 + np.exp(-features))
+        expected = hidden @ CompactModel.get_weights()[2] + CompactModel.get_weights()[3]
+
+        actual = agent._model_predictor(CompactModel())(features)
+
+        np.testing.assert_allclose(actual, expected)
+
+    def test_deep_q_learning_bottleneck_predictor_matches_swish_network(self):
+        class BottleneckModel:
+            @staticmethod
+            def get_weights():
+                return [
+                    np.array([[1.0, 0.0, -1.0, 0.5], [0.0, 1.0, 0.5, -1.0]]),
+                    np.zeros(4),
+                    np.array([[1.0, 0.0], [0.0, 1.0], [0.5, -0.5], [-0.5, 0.5]]),
+                    np.zeros(2),
+                    np.array([[1.0, 2.0], [3.0, 4.0]]),
+                    np.array([0.5, -0.5]),
+                ]
+
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(data)
+        features = np.array([[-1.0, 2.0], [0.5, -0.5]])
+        weights = BottleneckModel.get_weights()
+        first_hidden = features @ weights[0] + weights[1]
+        first_hidden = first_hidden / (1.0 + np.exp(-first_hidden))
+        bottleneck = first_hidden @ weights[2] + weights[3]
+        bottleneck = bottleneck / (1.0 + np.exp(-bottleneck))
+        expected = bottleneck @ weights[4] + weights[5]
+
+        actual = agent._model_predictor(BottleneckModel())(features)
+
+        np.testing.assert_allclose(actual, expected)
+
+    def test_deep_q_learning_gamma_zero_trains_both_action_targets(self):
+        class DummyModel:
+            def __init__(self):
+                self.targets = None
+
+            def predict(self, features, verbose=0):
+                return np.zeros((len(features), 2), dtype=float)
+
+            def train_on_batch(self, features, targets):
+                self.targets = targets.copy()
+
+        data = make_market_data(periods=60)
+        agent = DeepQLearningAgent(data, gamma=0.0, episodes=1, epsilon=1.0)
+        model = DummyModel()
+        with patch.object(agent, "_require_tensorflow"), patch.object(
+            agent, "_training_rng", return_value=np.random.default_rng(7)
+        ), patch.object(agent, "build_model", return_value=model):
+            agent.train_model("AAA")
+
+        expected_long = agent._reward_utility(
+            agent.train_data["AAA"]["rewards_train"].to_numpy(dtype=float)
+        )
+        np.testing.assert_allclose(model.targets[:, 0], 0.0)
+        np.testing.assert_allclose(model.targets[:, 1], expected_long)
+        self.assertEqual(agent.training_info["AAA"]["EpsilonFinal"], 0.0)
+        self.assertEqual(agent.training_info["AAA"]["TrainingMode"], "AllActionTargets")
+
+    def test_deep_q_learning_action_targets_include_position_change_cost(self):
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(data, transaction_cost=0.001)
+
+        targets = agent._immediate_action_targets(
+            current_positions=np.array([0, 1]),
+            raw_returns=np.array([0.01, -0.01]),
+        )
+
+        np.testing.assert_allclose(targets, [[0.0, 0.009], [-0.001, -0.015]])
 
     def test_deep_q_learning_retries_tensorflow_import_lazily(self):
         data = make_market_data(periods=20)
@@ -953,7 +1062,7 @@ class BaseAgentsTests(unittest.TestCase):
 
         data = make_market_data(periods=60)
         agent = DeepQLearningAgent(
-            data, episodes=2, verbose=1, progress_interval=1, random_state=7
+            data, gamma=0.0, episodes=2, verbose=1, progress_interval=1, random_state=7
         )
         model = DummyModel()
         with patch.object(agent, "_require_tensorflow"), patch.object(
@@ -967,28 +1076,116 @@ class BaseAgentsTests(unittest.TestCase):
         self.assertIn("steps/s", output)
         self.assertEqual(model.batch_calls, 2)
         self.assertEqual(model.batch_sizes, [len(agent.train_data["AAA"]["X_train"])] * 2)
-        self.assertEqual(
-            agent.train_data["AAA"]["StateFeatures"][-1],
-            "CurrentPosition",
+        self.assertListEqual(
+            agent.train_data["AAA"]["StateFeatures"][-5:],
+            [
+                "CurrentPosition",
+                "HoldingProgress",
+                "CooldownProgress",
+                "CurrentDrawdown",
+                "MaxDrawdown",
+            ],
         )
         self.assertIn("TrainingSeconds", agent.training_info["AAA"])
         self.assertEqual(agent.training_info["AAA"]["TrainingUpdates"], 2)
 
-    def test_deep_q_learning_policy_carries_current_position(self):
-        q_values_by_position = np.array(
-            [
-                [[0.0, 1.0], [1.0, 0.0]],
-                [[0.0, 1.0], [1.0, 0.0]],
-                [[0.0, 1.0], [1.0, 0.0]],
-            ]
+    def test_deep_q_learning_uses_double_dqn_target(self):
+        class DummyModel:
+            def __init__(self, q_values):
+                self.q_values = np.asarray(q_values, dtype=float)
+                self.targets = None
+                self.set_weight_calls = 0
+
+            def predict(self, features, verbose=0):
+                return np.tile(self.q_values, (len(features), 1))
+
+            def train_on_batch(self, features, targets):
+                self.targets = targets.copy()
+
+            def get_weights(self):
+                return []
+
+            def set_weights(self, weights):
+                self.set_weight_calls += 1
+
+        data = make_market_data(periods=60)
+        agent = DeepQLearningAgent(
+            data,
+            gamma=0.5,
+            epsilon=0.0,
+            epsilon_min=0.0,
+            episodes=1,
+            target_update_interval=1,
+        )
+        online_model = DummyModel([0.0, 1.0])
+        target_model = DummyModel([10.0, 4.0])
+        with patch.object(agent, "_require_tensorflow"), patch.object(
+            agent, "_training_rng", return_value=np.random.default_rng(7)
+        ), patch.object(
+            agent, "build_model", side_effect=[online_model, target_model]
+        ):
+            agent.train_model("AAA")
+
+        utility = agent._reward_utility(
+            agent.train_data["AAA"]["rewards_train"].to_numpy(dtype=float)
+        )
+        expected_long_targets = utility.copy()
+        expected_long_targets[:-1] += 0.5 * 4.0
+
+        np.testing.assert_allclose(online_model.targets[:, 0], 0.0)
+        np.testing.assert_allclose(
+            np.sort(online_model.targets[:, 1]),
+            np.sort(expected_long_targets),
+        )
+        self.assertEqual(target_model.set_weight_calls, 2)
+        self.assertIs(agent.target_models["AAA"], target_model)
+        self.assertEqual(agent.training_info["AAA"]["TrainingMode"], "DoubleDQN")
+        self.assertEqual(
+            agent.training_info["AAA"]["ReplaySize"],
+            len(agent.train_data["AAA"]["X_train"]),
         )
 
-        current_positions, actions, _ = DeepQLearningAgent._policy_trajectory(
-            q_values_by_position,
+    def test_deep_q_learning_rollout_enforces_holding_period_and_cooldown(self):
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(
+            data,
+            min_holding_period=2,
+            cooldown_period=2,
         )
 
-        np.testing.assert_array_equal(current_positions, [0, 1, 0])
-        np.testing.assert_array_equal(actions, [1, 0, 1])
+        def switch_position(state):
+            current_position = int(state[-5])
+            return np.array([[1.0, 0.0] if current_position else [0.0, 1.0]])
+
+        rollout = agent._state_rollout(
+            np.zeros((6, 1)),
+            np.zeros(6),
+            switch_position,
+        )
+
+        np.testing.assert_array_equal(rollout["positions"], [0, 1, 1, 0, 0, 0])
+        np.testing.assert_array_equal(rollout["actions"], [1, 1, 0, 0, 0, 1])
+        np.testing.assert_array_equal(rollout["holding_periods"], [0, 1, 2, 0, 0, 0])
+        np.testing.assert_array_equal(rollout["cooldowns"], [0, 0, 0, 2, 1, 0])
+
+    def test_deep_q_learning_drawdown_state_uses_only_prior_returns(self):
+        data = make_market_data(periods=20)
+        agent = DeepQLearningAgent(data)
+
+        rollout = agent._state_rollout(
+            np.zeros((3, 1)),
+            np.array([0.1, -0.2, 0.0]),
+            lambda state: np.array([[0.0, 1.0]]),
+        )
+
+        np.testing.assert_allclose(
+            rollout["drawdowns"],
+            [0.0, 0.0, np.exp(-0.2) - 1.0],
+        )
+        np.testing.assert_allclose(
+            rollout["max_drawdowns"],
+            [0.0, 0.0, np.exp(-0.2) - 1.0],
+        )
 
     def test_quantile_regression_agent_uses_purged_time_split_and_live_row(self):
         data = make_market_data(periods=100)
